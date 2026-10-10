@@ -1,0 +1,1 @@
+var pageMarker = 'extension-page';

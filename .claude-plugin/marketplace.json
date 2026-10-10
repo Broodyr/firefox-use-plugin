@@ -1,0 +1,13 @@
+{
+  "name": "broodyr",
+  "description": "Broodyr's Claude Code plugins. firefox-use: deep control of Firefox for Claude Code, for developing and debugging userscripts and browser extensions",
+  "owner": { "name": "Broodyr" },
+  "plugins": [
+    {
+      "name": "firefox-use",
+      "source": { "source": "github", "repo": "Broodyr/firefox-use-plugin", "ref": "release" },
+      "description": "Deep control of a dedicated Firefox profile: browsing, privileged access, extension internals, Violentmonkey, Stylus and uBlock Origin workflows, a real debugger",
+      "category": "development"
+    }
+  ]
+}

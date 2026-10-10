@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "firefox-use page-only fixture",
+  "version": "1.0",
+  "browser_specific_settings": { "gecko": { "id": "page-ext@firefox-use" } },
+  "options_ui": { "page": "options.html" }
+}

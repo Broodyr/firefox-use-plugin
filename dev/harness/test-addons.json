@@ -1,0 +1,30 @@
+{
+  "about": "The add-ons the test profiles need, pinned by version and SHA-256 (AMO's own hash for that file). npm run test:setup puts them in dev/harness/.test-addons/; npm run test:setup -- --latest moves the pins to AMO's current versions. optional: not in the template profile; the tests that need it install it themselves (env.mjs addonFile).",
+  "addons": [
+    {
+      "id": "uBlock0@raymondhill.net",
+      "slug": "ublock-origin",
+      "name": "uBlock Origin",
+      "version": "1.75.0",
+      "url": "https://addons.mozilla.org/firefox/downloads/file/5034826/ublock_origin-1.75.0.xpi",
+      "sha256": "5b74415860456370644bd80f16125e865b0e6c356bb5dfcfb84069967eaa5287"
+    },
+    {
+      "id": "{aecec67f-0d10-4fa7-b7c7-609a2db280cf}",
+      "slug": "violentmonkey",
+      "name": "Violentmonkey",
+      "version": "2.49.0",
+      "url": "https://addons.mozilla.org/firefox/downloads/file/5009389/violentmonkey-2.49.0.xpi",
+      "sha256": "761ea6a32cee78c3263d19bbd821eafd4ea0722f10ff358ecba2739c5bff76fb"
+    },
+    {
+      "id": "{7a7a4a92-a2a0-41d1-9fd7-1e92480d612d}",
+      "slug": "styl-us",
+      "name": "Stylus",
+      "version": "2.4.14",
+      "url": "https://addons.mozilla.org/firefox/downloads/file/5044316/styl_us-2.4.14.xpi",
+      "sha256": "51d4efd6aa6484a749b97e36222f7bbe2ff699ed16b9a13adf40ecb6a0597081",
+      "optional": true
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "name": "firefox-use",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Claude Code plugin for deep, autonomous control of a Firefox dev profile",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "bin": {
+    "firefox-use": "server/dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p server && node dev/stamp.mjs",
+    "harness": "node dev/harness/harness.ts",
+    "test:setup": "node dev/harness/test-setup.mjs",
+    "test:core": "node dev/harness/run-tests.mjs core",
+    "test:slow": "node dev/harness/run-tests.mjs slow",
+    "test:integration": "node dev/harness/run-tests.mjs all",
+    "test:personal": "node dev/harness/personal-parity.mjs",
+    "test:proxy": "node --test dev/harness/tests/proxy.test.ts",
+    "test:live": "node dev/harness/live-check.ts",
+    "release": "node dev/release.mjs",
+    "test:release": "node dev/release.mjs && node dev/harness/run-tests.mjs core --server-root=.release-build",
+    "kill": "node server/dist/cli.js kill"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "pngjs": "^7.0.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/pngjs": "^6.0.5",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "web-ext": "^10.7.0"
+  }
+}

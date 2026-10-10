@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "firefox-use companion",
+  "version": "0.2.4",
+  "description": "Helper for firefox-use (temporary add-on, installed at each launch): userScripts fast-loop runner with GM_* stubs.",
+  "browser_specific_settings": { "gecko": { "id": "companion@firefox-use", "strict_min_version": "136.0" } },
+  "permissions": ["storage", "tabs"],
+  "optional_permissions": ["userScripts"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "scripts": ["bg.js"] }
+}

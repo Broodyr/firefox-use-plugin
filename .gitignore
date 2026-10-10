@@ -1,0 +1,10 @@
+node_modules/
+server/dist/
+.firefox-use/
+.release-build/
+dev/harness/.test-addons/
+dev/spikes/
+dev/demo/
+PROGRESS.md
+SPEC.md
+CLAUDE.md

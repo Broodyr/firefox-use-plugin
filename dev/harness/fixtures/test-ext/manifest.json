@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "name": "firefox-use test extension",
+  "version": "1.0",
+  "browser_specific_settings": { "gecko": { "id": "test-ext@firefox-use" } },
+  "background": { "scripts": ["bg.js"], "persistent": true },
+  "permissions": ["storage", "<all_urls>"],
+  "content_scripts": [{ "matches": ["http://127.0.0.1/*"], "js": ["cs.js"], "run_at": "document_end" }],
+  "web_accessible_resources": ["page.html"]
+}

@@ -1,0 +1,34 @@
+# The core integration suite on a clean Windows runner, against the source build and the release bundle.
+# No claude-dev here: the tests run on throwaway copies of a template profile, with the add-ons pinned in
+# dev/harness/test-addons.json (npm run test:setup downloads them from addons.mozilla.org and checks their hashes).
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Firefox
+        # windows-latest ships Firefox; install it if an image ever doesn't
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:ProgramFiles\Mozilla Firefox\firefox.exe")) { choco install firefox -y --no-progress }
+          (Get-Item "$env:ProgramFiles\Mozilla Firefox\firefox.exe").VersionInfo.ProductVersion
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:setup
+      - name: Core suite (source build)
+        run: npm run test:core
+      - name: Core suite (release bundle)
+        run: npm run test:release
