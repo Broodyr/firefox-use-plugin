@@ -18,6 +18,7 @@ Most areas have ONE read tool and ONE write tool, chosen with `kind` (read) or `
 | Lifecycle | `ff_launch`, `ff_status`, `ff_restart`, `ff_quit`, `ff_kill`, `ff_selfcheck` (when a tool says Firefox internals changed) |
 | The user's own Firefox (only on request) | `ff_launch` with `profile: "personal"` — see "Personal mode" below |
 | Hand to the user | `ff_handoff`, `ff_handback` |
+| Let the user watch / run in the background | `ff_window(action: "show" \| "park")` |
 | Tabs | `tabs(op: "list" \| "create" \| "select" \| "close")` |
 | Read the page | `navigate`, `read_page`, `find`, `get_page_text`, `screenshot` |
 | Act | `click`, `type`, `key`, `hover`, `scroll`, `scroll_to`, `drag`, `form_input`, `set_files`, `input`, `resize` |
@@ -50,6 +51,7 @@ Older tool names (`cookies_get`, `us_install`, `wait_for_selector`, …) still w
 - Any browser tool launches Firefox on demand. `ff_launch` does the same explicitly and reports versions and launch notes. `ff_status` never launches anything.
 - At launch, uBO and Violentmonkey are brought up to the version in the user's main profile if that one is newer. Nothing updates mid-session. The **companion** extension (fast-mode userscripts) is installed as a temporary add-on at every launch.
 - Everything happens in an **agent window parked off-screen**, in a tab group named **Claude**. It never takes focus. Being a normal (not minimised) window, its pages count as visible, so `requestAnimationFrame`, CSS transitions, canvas/WebGL drawing and observers run as for the user, and screenshots show them. If the user minimises it, the next result says so: pages are then hidden and animation-dependent checks are unreliable until they click its taskbar button (Claude can't restore it without taking the foreground).
+- **`ff_window`** when the user wants to watch ("let me see it" -> `show`: on-screen, where it was before, without activating it) or wants it out of the way again ("run it in the background" -> `park`). The choice lasts for the session; config `agentWindow` sets the start (`{ "dev": "offscreen" | "visible" | "minimized", "personal": ... }`). Display only: it never lets you do more. A handback leaves a shown window on-screen.
 - `ff_quit` quits gracefully. `ff_restart` restarts and reopens the agent tabs.
 
 ## Tabs
@@ -115,8 +117,9 @@ Older tool names (`cookies_get`, `us_install`, `wait_for_selector`, …) still w
 
 Use it **only when the user asks** for their own Firefox (their logged-in sites, their extensions). claude-dev stays the default for everything else.
 
-- `ff_launch(profile: "personal")` starts their Firefox with remote control, or attaches to it if it is already running with remote control. Other tools never start it. Claude works in a **window of its own** (minimised); the user's tabs are listed with `tabs(op: "list", include_user: true)` and touched only when the user names one. Their console and network traffic is never logged.
+- `ff_launch(profile: "personal")` starts their Firefox with remote control, or attaches to it if it is already running with remote control. Other tools never start it. Claude works in a **window of its own**, on-screen so the user can watch, created in the background and never activated (Claude's actions don't raise it); the user's tabs are listed with `tabs(op: "list", include_user: true)` and touched only when the user names one. Their console and network traffic is never logged.
 - **Page level only.** Available: tabs, navigate, read_page/find (computed from the DOM: cross-origin iframes are not read), get_page_text, screenshot, form_input, the input tools, batch, handoff, page console/errors, page network (bodies of Claude's tabs only), `eval` in the page realm, the waits, and dialogs (`ff_write(action: "dialogs_policy" | "dialog_answer" | "http_auth")`, `ff_read(kind: "dialogs" | "http_auth")`; dialogs in their own tabs stay theirs). Everything else fails with `PERSONAL_MODE`: the privileged layer, extensions, prefs, add-ons, snapshots, scope, userscript/uBO adapters, other realms, verify, ff_restart.
+- **Covered means throttled there.** The user's profile keeps occlusion tracking on, so when other windows cover Claude's window, or it is minimised, its pages count as hidden: rAF, transitions and observers barely run, timers fire about once a second. The next result says so once; `ff_status` shows it. Page work (reading, clicking, forms) still works; for visual or timing checks ask the user to bring the window forward. `ff_window(park)` minimises it there (off-screen would be throttled the same and unreachable from the taskbar); `ff_window(show)` restores it, which brings it to the front if the user is working in their Firefox, so only when they want to see it.
 - **The user's real sessions are in reach.** Every submit, post, send, purchase or account change needs the user's explicit OK for that action, in chat. Never enter credentials; hand the window over with `ff_handoff` instead.
 - Errors and what to do:
   - `PERSONAL_SETUP_NEEDED`: the user runs `setup/personal-mode.ps1` once (it keeps remote control from switching off Safe Browsing, saved logins and session restore in their profile). Never write their profile yourself.

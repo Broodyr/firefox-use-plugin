@@ -36,6 +36,8 @@ export interface RunState {
   launcherPid?: number;
   /** personal mode: Claude's tabs in window order (BiDi ids change per session; the window is found again by URL) */
   personalTabs?: { handle: number; url: string }[];
+  /** ff_window's choice (visible / offscreen) for the session that made it (owner = its proxy pid); config sets the start */
+  windowMode?: { mode: import('../config.js').WindowMode; owner: number };
   /** debugger breakpoints and settings, set again by the next backend after a hot reload */
   debugger?: import('./debugger.js').SavedDebugger;
 }

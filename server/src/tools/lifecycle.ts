@@ -53,6 +53,8 @@ async function describePersonal(b: Browser, detail: string): Promise<string> {
     `transport: BiDi ${b.dead ? 'DOWN' : 'ok'} (127.0.0.1:${b.state.bidiPort}) · no privileged access, no devtools (page-level tools only)`,
     `Claude's window: ${tabs.length} tab(s) · current tab ${b.cur ?? '-'}: ${tabs.find((t) => t.current)?.url ?? '-'} · your own tabs: ${all.length - tabs.length} (not touched unless you name one)`,
   ];
+  const win = await b.windowLine().catch(() => null);
+  if (win) lines.push(`${win} (ff_window show / park)`);
   lines.push(...dialogStatus(b));
   if (detail !== 'summary') lines.push(`profile dir: ${b.state.profileDir}`, `connected since: ${b.state.startedAt}`);
   return lines.join('\n');
@@ -78,10 +80,8 @@ async function describe(b: Browser, detail: string): Promise<string> {
     `scope: ${b.scope ? `${b.scope.description} [${b.scope.areas.join(', ')}]` : 'none approved'} · last checkpoint: ${lastCp(b)}`,
     ...autoConfigLine(),
   ];
-  if (b.agentWindowMode() !== 'none') {
-    const w = await b.callChrome<{ state: string }>(CS.WINDOW_VISIBILITY).catch(() => null);
-    if (w) lines.push(`agent window: ${w.state === 'parked' ? 'parked off-screen (pages render as visible)' : w.state === 'on-screen' ? 'on-screen (the user brought it up)' : 'MINIMISED by the user: pages count as hidden (rAF, transitions, observers barely run) until they click its taskbar button'}`);
-  }
+  const win = await b.windowLine().catch(() => null);
+  if (win) lines.push(win);
   const errs = b.recentErrors(undefined, 3);
   if (errs.length) lines.push(`recent console errors: ${errs.length}`);
   lines.push(...dialogStatus(b));
@@ -134,7 +134,7 @@ async function launch(ctx: Ctx, profile?: string, headless?: boolean): Promise<{
 export const lifecycleTools = [
   tool({
     name: 'ff_launch',
-    description: 'Start (or attach to) Firefox on the claude-dev profile: connects BiDi + privileged access, sets up the agent window (parked off-screen, so pages render as if visible) with the "Claude" tab group, installs staged add-ons on first run. Other tools launch on demand, so this is optional. profile "personal" (only when the user asks for their own Firefox): their own profile at page level, in a window Claude opens.',
+    description: 'Start (or attach to) Firefox on the claude-dev profile: connects BiDi + privileged access, sets up the agent window (parked off-screen, so pages render as if visible) with the "Claude" tab group, installs staged add-ons on first run. Other tools launch on demand, so this is optional. profile "personal" (only when the user asks for their own Firefox): their own profile at page level, in a window Claude opens on-screen (never activated) so the user can watch.',
     args: {
       profile: z.string().optional().describe('Profile name (default claude-dev); "personal" = the user\'s own Firefox, page-level tools only'),
       headless: z.boolean().optional().describe('Headless (test profiles only)'),
@@ -315,10 +315,24 @@ export const lifecycleTools = [
       const b = await ctx.browser();
       const was = b.handoff;
       b.handoff = null;
-      await b.minimizeWindow();
+      await b.afterHandback();
       const ctxId = await b.context();
       const info = await b.callPage(ctxId, '() => ({ url: location.href, title: document.title })').catch(() => ({ url: '?', title: '?' }));
-      return `${was ? `handoff ended after ${Math.round((Date.now() - was.since) / 1000)} s` : 'no handoff was active'}; agent window ${b.agentWindowMode() === 'offscreen' ? 'parked off-screen' : 'minimised'}\ncurrent tab: ${info.title} — ${info.url}`;
+      const m = b.agentWindowMode();
+      return `${was ? `handoff ended after ${Math.round((Date.now() - was.since) / 1000)} s` : 'no handoff was active'}; agent window ${m === 'offscreen' ? 'parked off-screen' : m === 'minimized' ? 'minimised' : 'left on-screen'}\ncurrent tab: ${info.title} — ${info.url}`;
+    },
+  }),
+  tool({
+    name: 'ff_window',
+    description: 'Show Claude\'s window on-screen or park it off-screen, for the rest of this session (config agentWindow sets the start: claude-dev parked off-screen, personal mode visible). Display only: it never lets Claude do more. Neither action activates the window, except that show restoring a minimised window brings it to the front (claude-dev always; personal mode when the user is working in their Firefox). Call it when the user asks ("let me see it" -> show, "run it in the background" -> park).',
+    args: {
+      action: z.enum(['show', 'park']).describe('"show": a normal window on-screen, where it was before (else centred); "park": claude-dev moves it off-screen (pages keep rendering); personal mode minimises it (there an off-screen window would be throttled anyway)'),
+    },
+    write: true,
+    async handler(a, ctx) {
+      if (currentClient()) fail('NOT_OWNER', 'this Firefox and its agent window belong to another Claude session', 'Ask in the session that owns it.');
+      const b = await ctx.browser();
+      return b.setWindowMode(a.action === 'show' ? 'visible' : 'offscreen');
     },
   }),
   tool({

@@ -31,10 +31,26 @@ export interface Config {
   approvalDialog?: boolean;
   /** personal mode: the profile to drive (default: the main profile from profiles.ini) */
   personalProfile?: string;
-  /** "offscreen" (default): the agent window is a normal window parked off-screen, so its pages count as visible and render (rAF, transitions); "minimized": the older behaviour (pages hidden, rendering throttled) */
-  agentWindow?: 'offscreen' | 'minimized';
+  /**
+   * Where Claude's window sits, per mode. dev (claude-dev) default "offscreen": a normal window parked off-screen, so its
+   * pages count as visible and render (rAF, transitions). personal default "visible": a normal on-screen window the user
+   * can watch, never activated by Claude. "minimized": pages hidden, rendering throttled. Personal mode treats
+   * "offscreen" as "minimized" (with occlusion tracking on, an off-screen window is throttled too, and the taskbar can't
+   * bring it back). A plain string sets dev only (the older flat setting). ff_window switches at runtime.
+   */
+  agentWindow?: WindowMode | { dev?: WindowMode; personal?: WindowMode };
   /** default true: at each claude-dev launch, compare its Violentmonkey scripts with the main profile's (read-only) */
   driftReport?: boolean;
+}
+
+export type WindowMode = 'offscreen' | 'visible' | 'minimized';
+const WINDOW_MODES: WindowMode[] = ['offscreen', 'visible', 'minimized'];
+
+/** The configured start mode of Claude's window: dev "offscreen", personal "visible" unless config says otherwise. */
+export function agentWindowSetting(personal: boolean): WindowMode {
+  const w = loadConfig().agentWindow;
+  const v = typeof w === 'string' ? (personal ? undefined : w) : w?.[personal ? 'personal' : 'dev'];
+  return v && WINDOW_MODES.includes(v) ? v : personal ? 'visible' : 'offscreen';
 }
 
 export interface Options {

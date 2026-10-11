@@ -68,6 +68,12 @@ const GIVE_BACK_FN = `(w) => {
   } finally { u.close(); if (dwm) dwm.close(); }
 }`;
 
+/** Where the agent window goes when it is shown: where it was before parking, else centred on the screen. */
+const HOME_FN = `(w) => {
+  const h = w.__claudeHome, s = w.screen;
+  return h ? [h.x, h.y] : [s.availLeft + Math.max(0, (s.availWidth - w.outerWidth) / 2), s.availTop + Math.max(0, (s.availHeight - w.outerHeight) / 2)];
+}`;
+
 const PARK_FN = `(w) => {
   const OFF = -20000;
   const parked = () => w.screenX <= OFF / 2;
@@ -75,10 +81,7 @@ const PARK_FN = `(w) => {
     w.__claudeParkHooks = true;
     w.addEventListener('activate', () => {
       if (!parked() || w.windowState === w.STATE_MINIMIZED) return;
-      const h = w.__claudeHome;
-      const s = w.screen;
-      const x = h ? h.x : s.availLeft + Math.max(0, (s.availWidth - w.outerWidth) / 2);
-      const y = h ? h.y : s.availTop + Math.max(0, (s.availHeight - w.outerHeight) / 2);
+      const [x, y] = (${HOME_FN})(w);
       w.moveTo(x, y);
       w.__claudeViewing = true;
     });
@@ -102,14 +105,28 @@ const PARK_FN = `(w) => {
 /** Park the agent window off-screen (handback, or a window set up by an older version that minimised it). Returns parked | on-screen | minimized. */
 export const PARK = `({ handback }) => { if (handback) { window.__claudeViewing = false; } return (${PARK_FN})(window); }`;
 
+/**
+ * ff_window show: bring the agent window on-screen WITHOUT activating it (moving a normal window doesn't). A window the
+ * user minimised is restored only because the user asked to see it: restoring takes the foreground (measured).
+ */
+export const SHOW = `() => {
+  window.__claudeViewing = true;
+  if (window.windowState === window.STATE_MINIMIZED) { window.restore(); return 'restored'; }
+  if (window.screenX <= -10000) { const [x, y] = (${HOME_FN})(window); window.moveTo(x, y); }
+  return 'on-screen';
+}`;
+
 /** Where the agent window is: parked off-screen, on-screen (the user brought it up), or minimized (pages hidden). */
 export const WINDOW_VISIBILITY = `() => {
   if (window.windowState === window.STATE_MINIMIZED) return { state: 'minimized', since: window.__claudeMinimizedAt ?? null };
   return { state: window.screenX <= -10000 ? 'parked' : 'on-screen' };
 }`;
 
-/** Mark this window as the agent window, make sure the Claude tab group exists, then hide it (park off-screen or minimise). */
-export const SETUP_AGENT_WINDOW = `({ hide, label, color, key = '' }) => {
+/**
+ * Mark this window as the agent window, make sure the Claude tab group exists, then place it: park off-screen, minimise,
+ * or "show" (visible mode: on-screen, not activated; a window Firefox just launched hands the foreground back).
+ */
+export const SETUP_AGENT_WINDOW = `({ hide, label, color, key = '', launched = false }) => {
   ${TABS}
   window.__claudeAgent = true;
   const gb = window.gBrowser;
@@ -125,6 +142,11 @@ export const SETUP_AGENT_WINDOW = `({ hide, label, color, key = '' }) => {
   let hidden = null;
   if (hide === 'minimize' && window.windowState !== window.STATE_MINIMIZED) window.minimize();
   if (hide === 'offscreen') hidden = (${PARK_FN})(window);
+  if (hide === 'show') {
+    if (window.screenX <= -10000 && window.windowState === window.STATE_NORMAL) { const [x, y] = (${HOME_FN})(window); window.moveTo(x, y); }
+    window.__claudeViewing = true;
+    if (launched) { try { (${GIVE_BACK_FN})(window); } catch (e) { /* not Windows: nothing to hand back */ } }
+  }
   return { group: g.id, tabs: g.tabs.map((t) => ({ id: idOf(t), bid: t.linkedBrowser.browserId })), windowState: window.windowState, hidden };
 }`;
 
@@ -314,10 +336,7 @@ export const HANDOFF_SHOW = `({ id }) => {
   if (t) t.ownerDocument.defaultView.gBrowser.selectedTab = t;
   if (window.windowState === window.STATE_MINIMIZED) window.restore();
   // parked off-screen: back to where it was (or centred), then shown to the user (the one deliberate focus change)
-  if (window.screenX <= -10000) {
-    const h = window.__claudeHome, s = window.screen;
-    window.moveTo(h ? h.x : s.availLeft + Math.max(0, (s.availWidth - window.outerWidth) / 2), h ? h.y : s.availTop + Math.max(0, (s.availHeight - window.outerHeight) / 2));
-  }
+  if (window.screenX <= -10000) { const [x, y] = (${HOME_FN})(window); window.moveTo(x, y); }
   window.focus();
   return window.windowState;
 }`;

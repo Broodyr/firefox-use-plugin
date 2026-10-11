@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ensureDir, loadConfig, mainProfileAddons, type Options } from '../config.js';
+import { agentWindowSetting, ensureDir, loadConfig, mainProfileAddons, type Options, type WindowMode } from '../config.js';
 import { ToolError, fail } from '../errors.js';
 import { Bidi, BidiError, fromRemote, type BidiEvent } from '../transports/bidi.js';
 import { clearOrphanBidiSession } from '../transports/rdp.js';
@@ -24,6 +24,9 @@ import { DL_GUARD_INSTALL, syncDownloadApprovals } from './downloads.js';
 import { lastCheckpoint, maybeDailyCold, readWarm, restoreWarm, takeWarm, type SnapMeta } from '../snapshots/snapshots.js';
 
 export const SANDBOX = 'firefox-use';
+
+/** ff_window's choice per mode, kept by this backend so it outlives an idle quit or ff_restart (run state holds it across a hot reload) */
+const windowChoice: { dev?: WindowMode; personal?: WindowMode } = {};
 
 export interface ConsoleEntry { ts: number; level: string; text: string; context?: string; url?: string }
 export interface TabInfo { tab: number; id: string; agent: boolean; url: string; title: string; selected: boolean; current: boolean; bc?: number }
@@ -341,31 +344,71 @@ export class Browser {
     return this.callChrome<any>(CS.A11Y_WALK, { id: context, maxNodes });
   }
 
-  /** Handoff: show the agent window on this tab / park it off-screen again (minimise in "minimized" mode). */
+  /** Handoff: show the agent window on this tab (the one deliberate focus change). */
   async showWindow(context: string) { await this.callChrome(CS.HANDOFF_SHOW, { id: context }); }
-  async minimizeWindow() {
-    if (this.agentWindowMode() === 'offscreen') await this.callChrome(CS.PARK, { handback: true });
-    else await this.callChrome(CS.MINIMIZE);
+  /** After a handoff: back to the window mode (offscreen: parked again; minimized: minimised; visible: left where it is). */
+  async afterHandback() {
+    const m = this.agentWindowMode();
+    if (m === 'offscreen') await this.callChrome(CS.PARK, { handback: true });
+    else if (m === 'minimized') await this.callChrome(CS.MINIMIZE);
   }
-  /** "offscreen" (default): parked as a normal window so pages render; "minimized": pages hidden; headless: neither. */
-  agentWindowMode(): 'offscreen' | 'minimized' | 'none' {
-    return this.state.headless ? 'none' : loadConfig().agentWindow === 'minimized' ? 'minimized' : 'offscreen';
+  /**
+   * Where Claude's window sits: ff_window's choice for this session, else config (dev "offscreen", personal
+   * "visible"); headless: none. "offscreen" = a normal window parked off-screen (pages render as visible in claude-dev,
+   * where occlusion tracking is off); "visible" = on-screen, never activated; "minimized" = pages hidden.
+   */
+  agentWindowMode(): WindowMode | 'none' {
+    if (this.state.headless) return 'none';
+    const w = this.state.windowMode;
+    return w && w.owner === ownerPid() ? w.mode : windowChoice[this.personal ? 'personal' : 'dev'] ?? agentWindowSetting(this.personal);
   }
-  private visNoted = false;
-  private visCheckedAt = 0;
+  /** ff_window: show the window on-screen without activating it, or park it off-screen; lasts for this session. */
+  async setWindowMode(mode: 'visible' | 'offscreen'): Promise<string> {
+    if (this.agentWindowMode() === 'none') fail('HEADLESS', 'this Firefox is headless; there is no window to show or park');
+    this.rememberWindowMode(mode);
+    if (mode === 'visible') {
+      const r = await this.callChrome<string>(CS.SHOW);
+      return r === 'restored'
+        ? 'agent window restored from the taskbar (the user had minimised it; restoring brings it to the front) and kept on-screen for this session'
+        : 'agent window shown on-screen (not activated: it stays behind the window the user is working in) and kept there for this session; ff_window(park) moves it off-screen again';
+    }
+    const r = await this.callChrome<string>(CS.PARK, { handback: true });
+    if (r === 'minimized') return 'the agent window is minimised (by the user) and stays so (un-minimising would take the foreground); it is parked off-screen once they restore it. Its pages count as hidden until then';
+    return r === 'parked' ? 'agent window parked off-screen for this session (pages still render as visible); ff_window(show) brings it back' : `agent window could not be parked (${r})`;
+  }
+  /** One line for ff_status (null when headless). */
+  async windowLine(): Promise<string | null> {
+    const m = this.agentWindowMode();
+    if (m === 'none') return null;
+    const w = await this.callChrome<{ state: string }>(CS.WINDOW_VISIBILITY).catch(() => null);
+    if (!w) return null;
+    const where = w.state === 'parked' ? 'parked off-screen (pages render as visible)'
+      : w.state === 'on-screen' ? `on-screen (${m === 'visible' ? 'shown, not activated' : 'the user brought it up'})`
+        : 'MINIMISED by the user: pages count as hidden (rAF, transitions, observers barely run) until they click its taskbar button';
+    return `agent window: ${where} · mode ${m} (ff_window show / park)`;
+  }
+  protected rememberWindowMode(mode: WindowMode) {
+    this.state.windowMode = { mode, owner: ownerPid() };
+    windowChoice[this.personal ? 'personal' : 'dev'] = mode;
+    this.save();
+    this.visNoted = false;
+  }
+  protected visNoted = false;
+  protected visCheckedAt = 0;
   /**
    * A note for the next tool result when the agent window is minimised (the user did it: the server never
-   * minimises in "offscreen" mode, and can't undo it without taking the foreground). Once per minimise; checked at
-   * most every 3 s.
+   * minimises in "offscreen" or "visible" mode, and can't undo it without taking the foreground). Once per minimise;
+   * checked at most every 3 s.
    */
   async windowVisibilityNote(): Promise<string | null> {
-    if (this.agentWindowMode() !== 'offscreen' || !this.chromeCtx || Date.now() - this.visCheckedAt < 3000) return null;
+    const m = this.agentWindowMode();
+    if ((m !== 'offscreen' && m !== 'visible') || !this.chromeCtx || Date.now() - this.visCheckedAt < 3000) return null;
     this.visCheckedAt = Date.now();
     const v = await this.callChrome<{ state: string }>(CS.WINDOW_VISIBILITY).catch(() => null);
     if (v?.state !== 'minimized') { this.visNoted = false; return null; }
     if (this.visNoted) return null;
     this.visNoted = true;
-    return 'the agent window is minimised (by the user), so its pages count as hidden: requestAnimationFrame, CSS transitions, animations and observer callbacks barely run, and timers are throttled. Visual checks and timing are unreliable until it is restored. Claude cannot restore it without taking the foreground: ask the user to click the claude-dev taskbar button (it then stays visible), or, when a handoff is needed anyway, ff_handoff shows it and ff_handback parks it off-screen.';
+    return 'the agent window is minimised (by the user), so its pages count as hidden: requestAnimationFrame, CSS transitions, animations and observer callbacks barely run, and timers are throttled. Visual checks and timing are unreliable until it is restored. Claude cannot restore it without taking the foreground: ask the user to click the claude-dev taskbar button (it then stays visible), or ff_window(show) if they want to see it anyway (it comes to the front).';
   }
 
   /** Call a function in a privileged chrome window (default: the agent window). Result travels as JSON. */
@@ -430,7 +473,8 @@ export class Browser {
         else { delete this.state.tabs[k]; delete this.state.tabBids[k]; }
       }
     }
-    const r = await this.callChrome<{ tabs: { id: string; bid: number }[] }>(CS.SETUP_AGENT_WINDOW, { hide: this.agentWindowMode() === 'offscreen' ? 'offscreen' : this.agentWindowMode() === 'minimized' ? 'minimize' : 'none', label: this.groupLabel, color: this.groupColor, key: currentClient() });
+    const m = this.agentWindowMode();
+    const r = await this.callChrome<{ tabs: { id: string; bid: number }[] }>(CS.SETUP_AGENT_WINDOW, { hide: m === 'offscreen' ? 'offscreen' : m === 'minimized' ? 'minimize' : m === 'visible' ? 'show' : 'none', launched: this.launchedNow, label: this.groupLabel, color: this.groupColor, key: currentClient() });
     for (const t of r.tabs) this.handleFor(t.id, t.bid);
     const live = new Set(r.tabs.map((t) => t.id));
     for (const [k, v] of Object.entries(this.state.tabs)) if (!live.has(v) && this.state.tabBids[k] === undefined) delete this.state.tabs[k];

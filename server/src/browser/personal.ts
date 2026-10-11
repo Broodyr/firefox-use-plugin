@@ -5,7 +5,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { detectMainProfile, loadConfig, setupCommand, type Options } from '../config.js';
+import { detectMainProfile, loadConfig, setupCommand, type Options, type WindowMode } from '../config.js';
 import { ToolError, fail } from '../errors.js';
 import { Bidi, BidiError, type BidiEvent } from '../transports/bidi.js';
 import { BidiHub } from './bidihub.js';
@@ -68,6 +68,8 @@ export class PersonalBrowser extends Browser {
   /** Claude's window (BiDi client window id; regenerated per BiDi session, re-found by its tabs' URLs) */
   clientWindow = '';
   firefoxVersion = '';
+  /** the window was left by another session or a crashed backend: put it where this session's mode says */
+  private recoverWindow = false;
 
   private constructor(bidi: Bidi, state: RunState, opts: Options) {
     super(bidi, state, opts);
@@ -105,6 +107,7 @@ export class PersonalBrowser extends Browser {
       startedAt: prev?.startedAt && !launched ? prev.startedAt : new Date().toISOString(), ownerPid: ownerPid(), ownerBackendPid: process.pid,
       personal: true, launcherPid: launched ? launcherPid : prev?.launcherPid ?? 0,
       tabs: {}, current: prev?.current ?? null, nextTab: prev?.nextTab ?? 1, personalTabs: prev?.personalTabs,
+      windowMode: prev?.windowMode,
     };
     let bidi = new Bidi(`ws://127.0.0.1:${port}/session`);
     await bidi.connect();
@@ -129,6 +132,7 @@ export class PersonalBrowser extends Browser {
     const b = new PersonalBrowser(bidi, state, opts);
     b.firefoxVersion = caps.browserVersion ?? '';
     b.launchedNow = launched;
+    b.recoverWindow = !prev || prev.ownerPid !== ownerPid();
     b.launchNotes = launched ? [`started your Firefox (${dir}) with remote control on 127.0.0.1:${port}; it keeps running when this session ends`] : [`attached to your running Firefox (remote control on 127.0.0.1:${port})`];
     bidi.on('event', (e: BidiEvent) => { b.bidiHub.onEvent(e); b.onEvent(e); });
     bidi.on('close', () => { b.dead = true; b.bidiHub.close(); });
@@ -184,8 +188,14 @@ export class PersonalBrowser extends Browser {
         if (!this.clientWindow) fail('AGENT_WINDOW', 'could not find the window Claude created');
         this.state.tabs = {};
         this.handleFor(created.context);
-        if (!this.state.headless) await this.minimizeWindow().catch(() => {});
+        // created in the background where Firefox puts new windows; never activated (measured: creating, navigating,
+        // dialogs, downloads and window.open in it leave the foreground with the user's app)
+        if (!this.state.headless) await this.placeWindow(this.agentWindowMode()).catch(() => {});
+      } else if (this.recoverWindow && !this.state.headless) {
+        // a minimised window stays minimised: un-minimising brings it to the front when the user is working in Firefox
+        await this.placeWindow(this.agentWindowMode(), false).catch(() => {});
       }
+      this.recoverWindow = false;
       tops = await this.tree();
     }
     for (const [k, v] of Object.entries(this.state.tabs)) if (!tops.some((c) => c.context === v && c.clientWindow === this.clientWindow)) delete this.state.tabs[k];
@@ -254,13 +264,121 @@ export class PersonalBrowser extends Browser {
     return this.callPage(context, DOM_WALK, [maxNodes], { awaitPromise: false });
   }
 
+  // ------------------------------------------------------------ Claude's window: visible or minimised (plain BiDi)
+  // No off-screen parking here: occlusion tracking (on in the user's profile) counts an off-screen window as hidden,
+  // so it would be throttled like a minimised one, and without chrome access nothing brings a parked window back when
+  // the user picks it from the taskbar (they would type into an invisible window). Minimised is honest about both.
+  private async clientWin(): Promise<{ x: number; y: number; width: number; height: number; state: string } | null> {
+    if (!this.clientWindow) return null;
+    return (await this.bidi.send('browser.getClientWindows')).clientWindows.find((w: any) => w.clientWindow === this.clientWindow) ?? null;
+  }
+
+  /** Centred on the screen of the current tab (for a window found off-screen, e.g. parked by an older version). */
+  private async centred(w: { width: number; height: number }): Promise<{ x: number; y: number }> {
+    const ctx = this.cur != null ? this.state.tabs?.[String(this.cur)] : undefined;
+    const sc = ctx ? await this.callPage(ctx, '() => ({ l: screen.availLeft, t: screen.availTop, w: screen.availWidth, h: screen.availHeight })', [], { awaitPromise: false }).catch(() => null) : null;
+    if (!sc) return { x: 40, y: 40 };
+    return { x: Math.round(sc.l + Math.max(0, (sc.w - w.width) / 2)), y: Math.round(sc.t + Math.max(0, (sc.h - w.height) / 2)) };
+  }
+
+  /**
+   * On-screen as a normal window. Moving never takes the foreground; un-minimising (BiDi restore) does when the user
+   * is working in their Firefox at that moment (measured: with another app in front it doesn't), so only on request.
+   */
+  private async unminimize(restoreMinimized = true): Promise<'restored' | 'moved' | 'there' | 'minimized'> {
+    const w = await this.clientWin();
+    if (!w) return 'there';
+    if (w.state === 'minimized') {
+      if (!restoreMinimized) return 'minimized';
+      // back to where it was before it was minimised
+      await this.bidi.send('browser.setClientWindowState', { clientWindow: this.clientWindow, state: 'normal' });
+      return 'restored';
+    }
+    if (w.state === 'normal' && w.x <= -10000) {
+      await this.bidi.send('browser.setClientWindowState', { clientWindow: this.clientWindow, state: 'normal', ...(await this.centred(w)) });
+      return 'moved';
+    }
+    return 'there';
+  }
+
+  private async minimize() {
+    if (this.clientWindow) await this.bidi.send('browser.setClientWindowState', { clientWindow: this.clientWindow, state: 'minimized' });
+  }
+
+  /** Personal mode has two window modes: config / ff_window "offscreen" means minimised here (see above). */
+  override agentWindowMode(): WindowMode | 'none' {
+    const m = super.agentWindowMode();
+    return m === 'offscreen' ? 'minimized' : m;
+  }
+
+  private async placeWindow(mode: WindowMode | 'none', restoreMinimized = true) {
+    if (mode === 'minimized') await this.minimize();
+    else if (mode === 'visible') await this.unminimize(restoreMinimized);
+  }
+
+  /** document.hidden of the current agent tab (covered or minimised); null when unknown */
+  private async currentHidden(): Promise<boolean | null> {
+    const ctx = this.cur != null ? this.state.tabs?.[String(this.cur)] : undefined;
+    if (!ctx) return null;
+    // a page waiting in one of Claude's dialogs can't answer: don't spend the timeout on it
+    if ([...this.dialogs.open.values()].some((e) => e.context === ctx || this.bidiHub.top(e.context) === ctx)) return null;
+    const r = await Promise.race([this.callPage(ctx, '() => document.hidden', [], { awaitPromise: false }).catch(() => null), sleep(1000).then(() => null)]);
+    return typeof r === 'boolean' ? r : null;
+  }
+
   override async showWindow(context: string) {
-    await this.bidi.send('browser.setClientWindowState', { clientWindow: this.clientWindow, state: 'normal' }).catch(() => {});
+    await this.unminimize().catch(() => {});
     await this.bidi.send('browsingContext.activate', { context });
   }
 
-  override async minimizeWindow() {
-    if (this.clientWindow) await this.bidi.send('browser.setClientWindowState', { clientWindow: this.clientWindow, state: 'minimized' });
+  override async afterHandback() {
+    // visible: the window stays where the user left it
+    if (this.agentWindowMode() === 'minimized') await this.minimize();
+  }
+
+  override async setWindowMode(mode: 'visible' | 'offscreen'): Promise<string> {
+    if (this.agentWindowMode() === 'none') fail('HEADLESS', 'this Firefox is headless; there is no window to show or park');
+    if (mode === 'visible') {
+      this.rememberWindowMode('visible');
+      const r = await this.unminimize();
+      await sleep(1200); // occlusion is re-evaluated asynchronously
+      const hidden = await this.currentHidden();
+      return [
+        r === 'restored' ? "Claude's window restored from the taskbar and kept on-screen for this session (if the user was working in their Firefox, it came to the front)" : "Claude's window is on-screen for this session (not activated: it stays behind the window the user is working in)",
+        hidden ? 'It is covered by other windows, so Firefox counts its pages as hidden (rAF, transitions and observers barely run, timers about 1/s) until the user brings it forward or uncovers it.' : '',
+      ].filter(Boolean).join('. ');
+    }
+    this.rememberWindowMode('minimized');
+    await this.minimize();
+    return "Claude's window is minimised for this session (in the user's Firefox an off-screen window would be throttled just the same, and could not be brought back from the taskbar). Its pages count as hidden: page work goes on, but rAF, transitions and observers barely run and timers fire about once a second, so visual and timing checks are unreliable. ff_window(show), or the user clicking it in the taskbar, brings it back.";
+  }
+
+  /**
+   * In the user's profile occlusion tracking is on: Claude's visible window behind other windows is throttled like a
+   * minimised one (measured: hidden, 0 rAF/s, timers 1/s). Say so once per hidden spell (checked at most every 3 s;
+   * not in minimised mode, which was chosen).
+   */
+  override async windowVisibilityNote(): Promise<string | null> {
+    if (this.agentWindowMode() !== 'visible' || Date.now() - this.visCheckedAt < 3000) return null;
+    this.visCheckedAt = Date.now();
+    const hidden = await this.currentHidden();
+    if (!hidden) { if (hidden === false) this.visNoted = false; return null; }
+    if (this.visNoted) return null;
+    this.visNoted = true;
+    const w = await this.clientWin().catch(() => null);
+    const min = w?.state === 'minimized';
+    return `Claude's window in the user's Firefox ${min ? 'is minimised' : 'is covered by other windows'}, so Firefox counts its pages as hidden: requestAnimationFrame, CSS transitions and observer callbacks barely run, timers fire about once a second. Visual checks and timing are unreliable until it is visible: ${min ? 'ask the user to restore it, or ff_window(show) if they want to see it (it comes to the front if they are working in Firefox)' : 'ask the user to bring it forward or move it where nothing covers it'} (only if that matters for the task).`;
+  }
+
+  /** One line for ff_status. */
+  override async windowLine(): Promise<string | null> {
+    const m = this.agentWindowMode();
+    if (m === 'none') return null;
+    const w = await this.clientWin().catch(() => null);
+    if (!w) return null;
+    const hidden = await this.currentHidden();
+    const where = w.state === 'minimized' ? 'minimised' : w.x <= -10000 ? 'parked off-screen' : `on-screen at ${w.x},${w.y}`;
+    return `window: ${where} (mode ${m}) · pages ${hidden == null ? 'visibility unknown' : hidden ? 'HIDDEN (throttled: covered or minimised)' : 'visible'}`;
   }
 
   override async hub(): Promise<Hub> { return this.bidiHub; }
