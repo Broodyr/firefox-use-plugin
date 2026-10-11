@@ -57,8 +57,11 @@ export class ResourceServer {
   readonly log: Served[] = [];
   readonly latency = new Map<string, number>();
   private waiters = new Set<() => void>();
+  /** promote (personal mode): URL path -> what it serves; with promotedOnly nothing else is served */
+  readonly promoted = new Map<string, { file: string; type: string; body?: (src: Buffer) => Buffer }>();
 
-  constructor(public root: string) {}
+  /** promotedOnly: personal mode's server, which serves only the files being promoted (its own port file) */
+  constructor(public root: string, readonly promotedOnly = false) {}
 
   get origin() { return `http://127.0.0.1:${this.port}`; }
   get resourcesDir() { return path.join(this.root, 'resources'); }
@@ -68,7 +71,7 @@ export class ResourceServer {
   /** Start on the port this workspace used last (so uBO's userResourcesLocation keeps working), else a free one. */
   async start(): Promise<void> {
     if (this.srv) return;
-    const stateFile = path.join(stateDir(), 'resource-server.json');
+    const stateFile = path.join(stateDir(), this.promotedOnly ? 'promote-server.json' : 'resource-server.json');
     let want = 0;
     try { want = JSON.parse(fs.readFileSync(stateFile, 'utf8')).port ?? 0; } catch { /* first run */ }
     const listen = (p: number) => new Promise<http.Server>((res, rej) => {
@@ -94,7 +97,12 @@ export class ResourceServer {
     if (delay) await new Promise((r) => setTimeout(r, delay));
     let body: Buffer | null = null;
     let type = 'text/plain; charset=utf-8';
-    if (u.pathname === '/resources/bundle.js' || u.pathname === '/resources/') {
+    const pr = this.promoted.get(u.pathname);
+    if (pr) {
+      try { body = fs.readFileSync(pr.file); if (pr.body) body = pr.body(body); type = pr.type; } catch { body = null; }
+    } else if (this.promotedOnly) {
+      // nothing else of the workspace
+    } else if (u.pathname === '/resources/bundle.js' || u.pathname === '/resources/') {
       body = Buffer.from(this.bundle().text);
     } else {
       const m = /^\/(resources|scripts)\/(.+)$/.exec(u.pathname);
@@ -119,13 +127,16 @@ export class ResourceServer {
   }
 }
 
-/** The resource server for the current workspace (one per workspace, kept by the Browser that owns Firefox). */
-export async function resourceServer(b: Browser): Promise<ResourceServer> {
+/**
+ * The resource server for the current workspace (one per workspace, kept by the Browser that owns Firefox).
+ * promotedOnly: personal mode's, serving only what promote put in it, as long as the session runs.
+ */
+export async function resourceServer(b: Browser, promotedOnly = false): Promise<ResourceServer> {
   const root = path.resolve(workspace());
-  const key = `resources:${root.toLowerCase()}`;
+  const key = `${promotedOnly ? 'promote' : 'resources'}:${root.toLowerCase()}`;
   let s = b.adapters.get(key) as ResourceServer | undefined;
   if (!s) {
-    s = new ResourceServer(root);
+    s = new ResourceServer(root, promotedOnly);
     b.adapters.set(key, s);
     b.closers.push(() => { s!.stop(); b.adapters.delete(key); });
   }

@@ -21,6 +21,7 @@ Full tool names: `mcp__plugin_firefox-use_firefox__<tool>`. Load these in one se
 | Toggle / remove | `stylus_write(action: "enable" \| "disable" \| "uninstall", style)` |
 | Sync with Stylus's editor | `stylus_read(kind: "sync_status")`, `stylus_write(action: "sync")` |
 | Approval, rollback | `scope_set`, `undo`, `snapshot` / `restore` (part `"stylus"`) |
+| Into the user's own Firefox (when they ask; personal mode) | `promote(kind: "userstyle", path)`: their Stylus shows its install page, they click Install |
 
 `style` is the workspace path of a linked file, the style's name, or its Stylus id.
 

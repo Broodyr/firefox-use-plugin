@@ -115,7 +115,7 @@ export class Browser {
   /** dialogs and HTTP auth in agent tabs: policies per session, the record of what happened */
   readonly dialogs = new DialogHandler(this);
   get prompts() { return this.dialogs.entries; }
-  private runClosers() { for (const f of this.closers.splice(0)) { try { f(); } catch { /* ignore */ } } }
+  protected runClosers() { for (const f of this.closers.splice(0)) { try { f(); } catch { /* ignore */ } } }
 
   protected constructor(public bidi: Bidi, public state: RunState, public opts: Options) {}
 

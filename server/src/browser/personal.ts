@@ -135,7 +135,7 @@ export class PersonalBrowser extends Browser {
     b.recoverWindow = !prev || prev.ownerPid !== ownerPid();
     b.launchNotes = launched ? [`started your Firefox (${dir}) with remote control on 127.0.0.1:${port}; it keeps running when this session ends`] : [`attached to your running Firefox (remote control on 127.0.0.1:${port})`];
     bidi.on('event', (e: BidiEvent) => { b.bidiHub.onEvent(e); b.onEvent(e); });
-    bidi.on('close', () => { b.dead = true; b.bidiHub.close(); });
+    bidi.on('close', () => { b.dead = true; b.bidiHub.close(); b.runClosers(); });
     // only tab bookkeeping is subscribed for every tab; console and network are per agent tab (BidiHub.watch)
     await bidi.send('session.subscribe', { events: ['browsingContext.contextCreated', 'browsingContext.contextDestroyed', 'browsingContext.navigationStarted', 'browsingContext.userPromptOpened', 'browsingContext.userPromptClosed', 'network.authRequired'] });
     await b.ensureAgentWindow();
@@ -405,6 +405,7 @@ export class PersonalBrowser extends Browser {
   override async detach() {
     try { this.recordTabs(await this.tree()); } catch { /* keep the last record */ }
     this.save();
+    this.runClosers();
     this.bidiHub.close();
     await this.bidi.endSession();
     this.bidi.close();
@@ -412,6 +413,7 @@ export class PersonalBrowser extends Browser {
 
   override async quit(): Promise<void> {
     await this.closeOwnWindow();
+    this.runClosers();
     this.bidiHub.close();
     await this.bidi.endSession();
     this.bidi.close();
@@ -422,6 +424,7 @@ export class PersonalBrowser extends Browser {
   override kill() {
     // the kill switch never kills the user's browser: drop Claude's window and the connection
     void this.closeOwnWindow().finally(() => { try { this.bidi.close(); } catch { /* ignore */ } });
+    this.runClosers();
     this.bidiHub.close();
     this.dead = true;
     clearRunState(PERSONAL);

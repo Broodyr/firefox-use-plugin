@@ -99,7 +99,7 @@ Ask in plain words. The plugin's skills tell Claude how to work, and load when a
 
 The browser runs in its own window, parked off-screen so it never takes focus; ask Claude to show it if you want to watch ("let me see it", "run it in the background"), or set `agentWindow` in `%LOCALAPPDATA%\firefox-use\config.json` (`{ "dev": "visible" }`). For a login, CAPTCHA or 2FA, Claude hands the window to you and waits; it never types credentials.
 
-**Personal mode** (optional): when you ask, Claude can also drive your own Firefox, at page level only: no privileged access, extension internals or debugger. It needs a one-time `setup\personal-mode.ps1`, which also adds a "Firefox (Claude can browse)" shortcut. There Claude works in a window of its own that you can watch; it never comes to the front by itself, and pages in it slow down while other windows cover it (Firefox's normal behaviour for hidden windows).
+**Personal mode** (optional): when you ask, Claude can also drive your own Firefox, at page level only: no privileged access, extension internals or debugger. It needs a one-time `setup\personal-mode.ps1`, which also adds a "Firefox (Claude can browse)" shortcut. There Claude works in a window of its own that you can watch; it never comes to the front by itself, and pages in it slow down while other windows cover it (Firefox's normal behaviour for hidden windows). To bring a userscript or userstyle built in claude-dev into your Firefox, Claude opens it there and Violentmonkey or Stylus shows its usual install page: you click Install. For uBO filters Claude gives you a list URL to import, or the lines for My filters.
 
 ## Safety
 

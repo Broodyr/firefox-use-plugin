@@ -22,6 +22,7 @@ Full tool names: `mcp__plugin_firefox-use_firefox__<tool>`. Load these in one se
 | Compare with / copy from the user's main profile | `us_read(kind: "main_diff") / us_write(action: "sync_main")` |
 | Options | `us_write(action: "dev_prelude")`, `us_write(action: "fast_gm")` |
 | Approval, rollback | `scope_set`, `undo`, `ff_read(kind: "snapshot_diff")` |
+| Into the user's own Firefox (when they ask; personal mode) | `promote(kind: "userscript", path)`: their Violentmonkey shows its install page, they click Install |
 
 ## Timing you can rely on
 

@@ -19,6 +19,7 @@ Full tool names: `mcp__plugin_firefox-use_firefox__<tool>`. Load these in one se
 | Check the effect | `verify`, `eval`, `screenshot`, `console_read` |
 | Settings and lists | `ubo_read(kind: "advanced")`, `ubo_write(action: "advanced_set")`, `ubo_read(kind: "lists") / ubo_write(action: "lists")`, `ubo_write(action: "trust_my_filters")` |
 | Backups, rollback | `ubo_read(kind: "backup")`, `ubo_write(action: "restore")`, `ff_write(action: "snapshot")`, `restore` (part `ubo`), `undo` |
+| Into the user's own uBO (when they ask; personal mode) | `promote(kind: "filters", path)`: serves a .txt list and gives the steps (Import in Filter lists, or paste into My filters); user scriptlets: tell them what to set, step by step |
 
 ## The loop
 
