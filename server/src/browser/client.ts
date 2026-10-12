@@ -12,6 +12,7 @@ export function currentClient(): string { return als.getStore()?.client ?? ''; }
 export function clientWorkspace(): string | undefined { return als.getStore()?.workspace; }
 
 export function runAsClient<T>(client: string, fn: () => Promise<T>, workspace?: string): Promise<T> { return als.run({ client, workspace }, fn); }
+export function runAsClientSync<T>(client: string, fn: () => T): T { return als.run({ client }, fn); }
 
 /** Client id for this backend when it routes through another session's proxy: the proxy pid. */
 export function myClientId(): string { return `s${process.env.FIREFOX_USE_PROXY_PID || process.pid}`; }

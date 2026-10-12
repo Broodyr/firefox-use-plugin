@@ -48,7 +48,7 @@ export class Browser {
   /** personal mode: the user's own profile over BiDi only (PersonalBrowser) */
   readonly personal: boolean = false;
   /** handoff per session: the user is driving the agent window; input tools refuse until ff_handback */
-  private handoffs = new Map<string, { reason: string; tab: number; since: number }>();
+  private handoffs = new Map<string, { reason: string; tab: number; since: number; by?: 'live view' }>();
   get handoff() { return this.handoffs.get(currentClient()) ?? null; }
   set handoff(v) { if (v) this.handoffs.set(currentClient(), v); else this.handoffs.delete(currentClient()); }
 

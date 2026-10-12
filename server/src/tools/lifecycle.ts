@@ -15,6 +15,7 @@ import { readShadows, releaseShadows, restoreFastScripts } from '../adapters/vio
 import { driftSummary, readDrift } from '../adapters/vmstore.js';
 import { PERSONAL, personalProfileDir, personalPrefsOk } from '../browser/personal.js';
 import { pinsStatus } from './pins.js';
+import { live } from '../live/liveview.js';
 
 /** this session's recent dialogs / HTTP auth challenges, and any left open */
 function dialogStatus(b: Browser): string[] {
@@ -23,6 +24,16 @@ function dialogStatus(b: Browser): string[] {
   const open = mine.filter((p) => p.result === 'open');
   if (open.length) out.push(`dialogs OPEN (dialog_handle answers them): ${open.map((p) => `${p.type} "${p.message.slice(0, 80)}"`).join('; ')}`);
   if (mine.length) out.push(`dialogs seen: ${mine.slice(-3).map((p) => `${p.type} "${p.message.slice(0, 80)}" (${p.result})`).join('; ')}`);
+  return out;
+}
+
+/** this session's handoff (the user has the browser) and live view, for ff_status */
+function sessionLines(b: Browser | null): string[] {
+  const out: string[] = [];
+  const h = b?.handoff;
+  if (h) out.push(`HANDED OFF since ${new Date(h.since).toTimeString().slice(0, 8)} on tab ${h.tab}: ${h.by === 'live view' ? 'the user took over from the live view' : h.reason} (ff_handback when they say they are done)`);
+  const l = live.statusLine();
+  if (l) out.push(l);
   return out;
 }
 
@@ -55,6 +66,7 @@ async function describePersonal(b: Browser, detail: string): Promise<string> {
   ];
   const win = await b.windowLine().catch(() => null);
   if (win) lines.push(`${win} (ff_window show / park)`);
+  lines.push(...sessionLines(b));
   lines.push(...dialogStatus(b));
   if (detail !== 'summary') lines.push(`profile dir: ${b.state.profileDir}`, `connected since: ${b.state.startedAt}`);
   return lines.join('\n');
@@ -82,6 +94,7 @@ async function describe(b: Browser, detail: string): Promise<string> {
   ];
   const win = await b.windowLine().catch(() => null);
   if (win) lines.push(win);
+  lines.push(...sessionLines(b));
   const errs = b.recentErrors(undefined, 3);
   if (errs.length) lines.push(`recent console errors: ${errs.length}`);
   lines.push(...dialogStatus(b));
@@ -161,7 +174,7 @@ export const lifecycleTools = [
       const cfg = loadConfig();
       if (ctx.opts.profile === PERSONAL) {
         const dir = personalProfileDir();
-        return [`PERSONAL MODE (your own Firefox): not connected (ff_launch with profile "personal" starts or attaches)`, `profile: ${dir ?? 'not found'}${dir ? (personalPrefsOk(dir) ? ' · set up' : ` · NOT SET UP (user runs: ${setupCommand('personal-mode.ps1')})`) : ''}`].join('\n');
+        return [`PERSONAL MODE (your own Firefox): not connected (ff_launch with profile "personal" starts or attaches)`, ...sessionLines(null), `profile: ${dir ?? 'not found'}${dir ? (personalPrefsOk(dir) ? ' · set up' : ` · NOT SET UP (user runs: ${setupCommand('personal-mode.ps1')})`) : ''}`].join('\n');
       }
       const st = readRunState(profileKey(ctx.opts));
       const staged = fs.existsSync(cfg.addonsDir) ? fs.readdirSync(cfg.addonsDir).filter((f) => f.endsWith('.xpi')) : [];
@@ -169,6 +182,7 @@ export const lifecycleTools = [
       return [
         ...(login ? [`LOGIN HANDOFF since ${login.since}: the profile is open as an ordinary Firefox on ${login.url} (${profileLocked(login.profileDir) ? 'window still open' : 'window closed: ff_handback resumes'})`] : []),
         'Firefox: not connected (any browser tool, or ff_launch, starts it)',
+        ...sessionLines(null),
         `firefox binary: ${cfg.firefoxPath}`,
         ...autoConfigLine(),
         `profile ${ctx.opts.profile}: ${cfg.profiles[ctx.opts.profile] ?? `NOT SET UP (user runs: ${setupCommand()})`} · mode ${ctx.opts.profileMode}`,
@@ -216,6 +230,7 @@ export const lifecycleTools = [
         b = await ctx.browser();
       }
       if (b.personal) {
+        live.closeAll('Claude\'s window was closed (ff_quit)');
         await b.quit();
         ctx.setBrowser(null);
         ctx.opts.profile = 'claude-dev';
@@ -224,12 +239,14 @@ export const lifecycleTools = [
       const c = currentClient();
       if (c) {
         const n = await b.callChrome<number>(CS.CLOSE_CLIENT_GROUP, { key: c });
+        live.close(c, 'this session\'s tab group was closed (ff_quit)');
         delete b.state.clients?.[c];
         b.save();
         return `closed this session's tab group (${n} tab(s)); Firefox keeps running for the session that owns it.`;
       }
       // fast-mode dev copies go with the companion: the installed copies they shadowed run again
       const back = await releaseShadows(b, (s) => s.by.mode === 'fast', 'its fast-mode dev copy ends with this Firefox').catch(() => ({ lines: [] as string[] }));
+      live.closeAll('Firefox was quit (ff_quit)');
       await b.quit();
       ctx.setBrowser(null);
       return ['Firefox quit.', ...back.lines].join('\n');
@@ -243,6 +260,7 @@ export const lifecycleTools = [
     async handler(a, ctx) {
       try { fs.unlinkSync(TOKEN_FILE); } catch { /* already revoked */ }
       fs.writeFileSync(path.join(ensureDir(RUN_DIR), 'killed.json'), JSON.stringify({ at: new Date().toISOString(), restore: !a.no_restore, by: 'ff_kill' }));
+      live.closeAll('stopped: the kill switch was engaged');
       const b = ctx.current();
       if (b) b.kill();
       ctx.setBrowser(null);
@@ -333,6 +351,30 @@ export const lifecycleTools = [
       if (currentClient()) fail('NOT_OWNER', 'this Firefox and its agent window belong to another Claude session', 'Ask in the session that owns it.');
       const b = await ctx.browser();
       return b.setWindowMode(a.action === 'show' ? 'visible' : 'offscreen');
+    },
+  }),
+  tool({
+    name: 'ff_live_view',
+    description: 'A live view of this session\'s browser for the user to watch: a page on 127.0.0.1 showing Claude\'s current tab as it changes (about 10 frames/s while a call runs), the tool calls, clicks and tabs, with a Take over button (hands the browser to the user like ff_handoff) and Show window / Run in background. Call it when the user wants to watch or for a demo. action "open" returns the URL: open it in the Claude app\'s built-in browser pane if you have its tools (preview_start with the url), else give the user the link. "close" ends it (the URL stops working); "status" shows viewers and capture timing. View-only: nothing on it sends input to Firefox, and its frames go to the user only, never to Claude.',
+    args: {
+      action: z.enum(['open', 'close', 'status']).default('open'),
+    },
+    write: true,
+    async handler(a, ctx) {
+      if (a.action === 'close') return live.close(currentClient()) ? 'live view closed; its URL no longer works' : 'no live view was open for this session';
+      if (a.action === 'status') return live.statusLine(currentClient(), true) ?? 'no live view is open for this session (ff_live_view open starts one)';
+      // the view shows this session's browser: start (or attach to) it, as any browser tool does
+      const b = await ctx.browser();
+      const v = await live.open();
+      const notes: string[] = [];
+      if (b.state.headless) notes.push('This Firefox is headless: the view works, but Take over and Show window are disabled (no window to show).');
+      if (currentClient()) notes.push('This session is routed through another session\'s Firefox: the view shows only this session\'s tab group; Take over is that session\'s own (ff_handoff).');
+      return [
+        `live view: ${live.url(v)}`,
+        'Open it in the Claude app\'s built-in browser pane if you have its tools, else give the user this link (any browser on this machine). It shows only this session\'s tabs, needs no login and works until the session ends, ff_quit, ff_kill or ff_live_view close.',
+        'Frames are captured only while the page is open. The user can press Take over there: your next write call then fails with HANDED_OFF; ask them what they want and call ff_handback when they say they are done.',
+        ...notes,
+      ].join('\n');
     },
   }),
   tool({

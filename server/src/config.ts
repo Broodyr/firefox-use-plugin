@@ -41,6 +41,11 @@ export interface Config {
   agentWindow?: WindowMode | { dev?: WindowMode; personal?: WindowMode };
   /** default true: at each claude-dev launch, compare its Violentmonkey scripts with the main profile's (read-only) */
   driftReport?: boolean;
+  /**
+   * The live view (ff_live_view): frame format (default "jpeg") and quality (default 0.6), captures per second while a
+   * tool call runs (default 10), and autoOpen (default false: true opens a view at every launch).
+   */
+  liveView?: { format?: 'jpeg' | 'png'; quality?: number; activeFps?: number; autoOpen?: boolean };
 }
 
 export type WindowMode = 'offscreen' | 'visible' | 'minimized';
@@ -98,6 +103,7 @@ export function loadConfig(): Config {
     personalProfile: file.personalProfile,
     driftReport: file.driftReport,
     agentWindow: file.agentWindow,
+    liveView: file.liveView,
   };
   return cached;
 }

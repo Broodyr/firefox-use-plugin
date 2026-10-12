@@ -45,7 +45,8 @@ describe('read/write composites', () => {
     }
     for (const n of ['site_read', 'ext_read', 'us_read', 'ubo_read', 'ff_read']) assert.equal(tools.find((t: any) => t.name === n).annotations?.readOnlyHint, true, n);
     for (const n of ['site_write', 'ext_write', 'us_write', 'ubo_write', 'ff_write', 'network_write']) assert.equal(tools.find((t: any) => t.name === n).annotations?.readOnlyHint, false, n);
-    assert.ok(tools.length <= 81, `${tools.length} tools listed`);
+    // 82: ff_live_view is listed on its own, like ff_window (SPEC §6.23)
+    assert.ok(tools.length <= 82, `${tools.length} tools listed`);
   });
 
   it('every kind/action runs its tool (audit log)', async () => {

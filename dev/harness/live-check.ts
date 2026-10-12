@@ -95,6 +95,25 @@ try {
   await step({ name: 'network', tool: 'network_read', args: { kind: 'requests', tab, filter: 'data.json' }, expect: /data\.json/ });
   await step({ name: 'realms', tool: 'realms_list', args: { tab }, expect: /\{kind:"page"\}/ });
   await step({ name: 'screenshot', tool: 'screenshot', args: { tab, scale: 0.3 }, expect: /\d+x\d+/ });
+  const lv = await step({ name: 'live view open', tool: 'ff_live_view', args: { action: 'open' }, expect: /live view: http:\/\/127\.0\.0\.1:\d+\/live\/[0-9a-f]{32}\// });
+  const lvUrl = /live view: (\S+)/.exec(lv?.text ?? '')?.[1];
+  if (lvUrl) {
+    // a viewer: the session's current tab arrives as a frame (only the check's own tab group is ever shown)
+    const t0 = Date.now();
+    const got = await new Promise<string>((res) => {
+      let buf = '';
+      const req = http.get(lvUrl + 'events', (r) => {
+        r.setEncoding('utf8');
+        r.on('data', (d: string) => { buf += d; const m = /event: frame\ndata: (.+)/.exec(buf); if (m) { req.destroy(); res(JSON.parse(m[1]).url); } });
+      });
+      req.on('error', () => res(''));
+      setTimeout(() => { req.destroy(); res(''); }, 8000);
+    });
+    const ok = got.startsWith(url);
+    results.push({ name: 'live view frame', ok, ms: Date.now() - t0, line: got ? `frame of ${got}` : 'no frame within 8 s' });
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${'live view frame'.padEnd(28)} ${String(Date.now() - t0).padStart(6)} ms  ${got ? `frame of ${got}` : 'no frame within 8 s'}`);
+    await step({ name: 'live view close', tool: 'ff_live_view', args: { action: 'close' }, expect: /closed/ });
+  }
   await step({ name: 'site storage read', tool: 'site_read', args: { kind: 'local_storage', tab }, expect: /item\(s\) in localStorage/ });
   await step({ name: 'memory', tool: 'perf_memory', args: { tab }, expect: /window [\d.]+ (KB|MB)/ });
   await step({ name: 'errors on the page', tool: 'console_read', args: { kind: 'errors', tab }, warnOnly: true });

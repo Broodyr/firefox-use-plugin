@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -52,6 +53,7 @@ import { currentClient, runAsClient } from './browser/client.js';
 import { Peer } from './transports/peer.js';
 import { armSessionResume, clearLogin, firefoxAlive, isAlive, loginCarry, ownerPid, profileKey, profileLocked, readLogin, readRunState } from './browser/launcher.js';
 import { PERSONAL, PersonalBrowser } from './browser/personal.js';
+import { live } from './live/liveview.js';
 
 const VERSION = '0.1.0';
 const opts = parseArgs(process.argv.slice(2));
@@ -99,6 +101,14 @@ async function getBrowser(): Promise<Browser> {
           b.launchNotes.push(sc.broken.length ? `SELF-CHECK after the Firefox update: ${sc.broken.length} feature(s) broken: ${sc.broken.join('; ')}` : `self-check after the Firefox update: all ${sc.ok.length} internals OK`);
         }
       }
+      // config liveView.autoOpen: a live view for this session at every launch
+      const testViewer = !!process.env.FIREFOX_USE_TEST_LIVE_VIEWER;
+      if (b.launchedNow && (loadConfig().liveView?.autoOpen || testViewer) && !currentClient()) {
+        const v = await live.open('').catch(() => null);
+        if (v && !testViewer) b.launchNotes.push(`live view (config liveView.autoOpen): ${live.url(v)} (open it in the Claude app's browser pane if you have its tools, else give the user the link)`);
+        // tests (SPEC §6.23 cost check): a viewer attached for the whole session
+        if (v && testViewer) http.get(live.url(v) + 'events', (res) => res.resume()).on('error', () => {});
+      }
       if (afterIdle) {
         const a = afterIdle;
         afterIdle = null;
@@ -118,7 +128,7 @@ const server = new Server(
   {
     capabilities: { tools: { listChanged: true } },
     instructions: [
-      'Firefox automation on a dedicated dev profile (claude-dev). All work happens in an agent window parked off-screen (pages render as visible; it never takes focus), in the "Claude" tab group; never use the user\'s own tabs unless they name one. ff_window(show | park) when the user wants to watch it or have it run in the background.',
+      'Firefox automation on a dedicated dev profile (claude-dev). All work happens in an agent window parked off-screen (pages render as visible; it never takes focus), in the "Claude" tab group; never use the user\'s own tabs unless they name one. ff_window(show | park) when the user wants to see the window or have it run in the background; ff_live_view when they want to watch you work (open its URL in the Claude app\'s browser pane if you have one).',
       'Typical loop: navigate -> read_page (refs) -> click / type / form_input -> read_page since=<snap> or screenshot.',
       'Most areas have one read tool and one write tool chosen by kind/action: site_read/site_write, ext_read/ext_write, us_read/us_write, ubo_read/ubo_write, ff_read/ff_write, network_read/network_write; plus wait_for(kind), console_read(kind), tabs(op).',
       'Use batch for 2+ predictable steps. {x, y} coordinates are pixels of the last screenshot (coords:"viewport" for CSS px). Logins/CAPTCHAs/2FA: ff_handoff, ask the user, then ff_handback.',
@@ -204,12 +214,12 @@ const PERSONAL_TOOLS = new Set([
   'input', 'click', 'type', 'key', 'drag', 'hover', 'scroll', 'scroll_to', 'set_files',
   'console_entries', 'console_clear', 'errors_summary', 'network_requests', 'network_body', 'headers_inspect', 'eval',
   'wait_for_selector', 'wait_for_text', 'wait_for_console', 'wait_for_network_idle', 'wait_for_navigation', 'wait_for_request', 'wait_for_expr',
-  'dialogs_policy', 'dialog_handle', 'http_auth', 'promote',
+  'dialogs_policy', 'dialog_handle', 'http_auth', 'promote', 'ff_live_view',
 ]);
 
 /** While the user has the browser (ff_handoff), only these state-changing tools may run. */
 // batch: its steps are checked one by one
-const HANDOFF_ALLOWED = new Set(['ff_handback', 'ff_handoff', 'ff_kill', 'ff_quit', 'ff_restart', 'batch']);
+const HANDOFF_ALLOWED = new Set(['ff_handback', 'ff_handoff', 'ff_kill', 'ff_quit', 'ff_restart', 'batch', 'ff_live_view']);
 
 /** One tool call: token check -> validation -> handler -> masking -> auditId -> truncation -> audit. */
 async function runTool(name: string, rawArgs: Record<string, unknown>): Promise<{ isError?: boolean; content: Content[] }> {
@@ -221,6 +231,8 @@ async function runTool(name: string, rawArgs: Record<string, unknown>): Promise<
   const t0 = Date.now();
   let target: { tab?: number; context?: string; url?: string; profile?: string; client?: string } | undefined = { profile: opts.profileMode === 'throwaway' ? `throwaway:${opts.profile}` : opts.profile, tab: rawArgs.tab as number | undefined, client: currentClient() || undefined };
   const promptsBefore = browser?.dialogs.seq ?? 0;
+  // the live view's caption strip (only when this session has a view open)
+  const lv = live.toolStart(name, rawArgs, !!def?.write);
   try {
     if (resolveError) throw resolveError;
     if (!def) throw new ToolError('UNKNOWN_TOOL', `no tool named ${name}`, 'List tools again; a rebuild may have renamed it.');
@@ -234,7 +246,12 @@ async function runTool(name: string, rawArgs: Record<string, unknown>): Promise<
         'Use claude-dev for privileged work: ff_quit (closes only Claude\'s window), then ff_launch with profile "claude-dev".');
     }
     if (def.write && browser?.handoff && !HANDOFF_ALLOWED.has(name)) {
-      throw new ToolError('HANDED_OFF', `the user has the browser (handoff: ${browser.handoff.reason})`, 'Wait for the user to say they are done, then call ff_handback.');
+      const h = browser.handoff;
+      if (h.by === 'live view') {
+        live.takeNote(); // this message says it
+        throw new ToolError('HANDED_OFF', `the user took over from the live view at ${new Date(h.since).toTimeString().slice(0, 8)} on tab ${h.tab}; ask them what they want, and call ff_handback when they say they're done`, 'Ask the user in chat; ff_handback resumes once they say they are done.');
+      }
+      throw new ToolError('HANDED_OFF', `the user has the browser (handoff: ${h.reason})`, 'Wait for the user to say they are done, then call ff_handback.');
     }
     const parsed = def.schema.extend({ max_chars: z.number().int().positive().optional(), detail: z.enum(['summary', 'normal', 'full']).optional(), unmask: unmaskArg }).safeParse(rawArgs);
     if (!parsed.success) throw new ToolError('BAD_ARGS', z.prettifyError(parsed.error), `See the ${name} input schema.`);
@@ -269,8 +286,11 @@ async function runTool(name: string, rawArgs: Record<string, unknown>): Promise<
     if (toolsChangedNote && name !== 'batch') { text += toolsChangedNote; toolsChangedNote = ''; }
     if (browser && !browser.dead && name !== 'batch') { const n = await browser.windowVisibilityNote?.().catch(() => null); if (n) browser.attachNotes.push(n); }
     if (browser?.attachNotes.length && name !== 'batch') text += '\nnote: ' + browser.attachNotes.splice(0).join('\nnote: ');
+    // the user pressed Take over in the live view since the last call
+    if (name !== 'batch') { const n = live.takeNote(); if (n) text += `\nnote: ${n}`; }
     text = truncate(text, args.max_chars ?? DEFAULT_MAX_CHARS);
     auditAppend({ id: auditId, tool: name, args: rawArgs, target, status: 'ok', ms: Date.now() - t0, write: !!def.write, changes: o.changes });
+    lv?.('ok');
     if (o.content) return { content: o.content as Content[] };
     return { content: [{ type: 'text' as const, text }, ...(o.images ?? []).map((i) => ({ type: 'image' as const, data: i.data, mimeType: i.mimeType }))] };
   } catch (e: any) {
@@ -286,6 +306,7 @@ async function runTool(name: string, rawArgs: Record<string, unknown>): Promise<
     }
     if (!(e instanceof ToolError)) log(`tool ${name} crashed:`, e?.stack ?? e);
     auditAppend({ id: auditId, tool: name, args: rawArgs, target, status: 'error', ms: Date.now() - t0, write: !!def?.write, error: { code: err.code, message: err.message } });
+    lv?.('error', err.code);
     const lines = [`error: ${err.code}`, err.message];
     if (err.hint) lines.push(`hint: ${renameRefs(err.hint)}`);
     for (const [k, v] of Object.entries(context)) lines.push(`${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
@@ -302,7 +323,7 @@ function savedBreakpoints(): boolean {
 }
 
 /** Tools that must answer while one of the session's dialogs is open. */
-const NO_DIALOG_RACE = new Set(['dialog_handle', 'dialogs_policy', 'batch', 'ff_window', 'ff_status', 'ff_quit', 'ff_kill', 'ff_restart', 'ff_audit_show', 'ff_handoff', 'ff_handback', 'scope_set', 'scope_show', 'scope_clear']);
+const NO_DIALOG_RACE = new Set(['dialog_handle', 'dialogs_policy', 'batch', 'ff_window', 'ff_live_view', 'ff_status', 'ff_quit', 'ff_kill', 'ff_restart', 'ff_audit_show', 'ff_handoff', 'ff_handback', 'scope_set', 'scope_show', 'scope_clear']);
 
 /**
  * while a dialog left open by dialogs_policy "ask" waits in one of this session's tabs, that page is
@@ -339,7 +360,7 @@ async function raceWithOpenDialog(work: Promise<ToolOutput | string>, name: stri
 }
 
 /** Tools that never touch a page (or must work while one is paused): no race against the debugger. */
-const NO_PAUSE_RACE = new Set(['batch', 'ff_window', 'ff_status', 'ff_quit', 'ff_kill', 'ff_restart', 'ff_audit_show', 'ff_handoff', 'ff_handback', 'scope_set', 'scope_show', 'scope_clear']);
+const NO_PAUSE_RACE = new Set(['batch', 'ff_window', 'ff_live_view', 'ff_status', 'ff_quit', 'ff_kill', 'ff_restart', 'ff_audit_show', 'ff_handoff', 'ff_handback', 'scope_set', 'scope_show', 'scope_clear']);
 
 /**
  * a breakpoint hit while a tool runs (a click, navigate or verify that runs the code) blocks that call
@@ -474,6 +495,7 @@ let detaching = false;
 const onDetach = async () => {
   detaching = true;
   log('detach requested (backend reload)');
+  live.detach(); // the pages reconnect to the next backend (same port and tokens)
   if (browser) await browser.detach().catch(() => {});
   process.exit(0);
 };
@@ -483,6 +505,7 @@ async function onStdinGone() {
   await new Promise((r) => setTimeout(r, 100)); // let a queued detach notice win
   if (detaching) return;
   log('stdin closed: ending the browser session (watchdog)');
+  live.closeAll('the Claude session ended');
   const b = browser;
   if (b && !b.dead) await b.quit().catch(() => b.kill());
   process.exit(0);
@@ -527,6 +550,7 @@ if (idleMinutes > 0) {
 // Kill switch from outside (setup/kill.ps1, firefox-use kill): token revoked -> drop every connection
 fs.watchFile(TOKEN_FILE, { interval: 1000 }, () => {
   if (readToken()) return;
+  live.closeAll('stopped: the kill switch was engaged');
   if (browser) {
     log('session token revoked: closing connections');
     try { browser.bidi.close(); } catch { /* ignore */ }
@@ -536,6 +560,20 @@ fs.watchFile(TOKEN_FILE, { interval: 1000 }, () => {
 
 process.on('uncaughtException', (e) => log('uncaught:', e.stack ?? e));
 process.on('unhandledRejection', (e: any) => log('unhandled rejection:', e?.stack ?? e));
+
+// live view (ff_live_view): frames come from the Firefox this backend drives; after a hot reload it serves the same URLs
+live.host = {
+  current: () => (browser && !browser.dead ? browser : null),
+  attach: async () => {
+    if (browser && !browser.dead) return browser;
+    const personal = opts.profile === PERSONAL;
+    const st = readRunState(personal ? PERSONAL : profileKey(opts));
+    if (!st || st.ownerPid !== ownerPid() || (!personal && (!firefoxAlive(st) || readLogin(profileKey(opts))))) return null;
+    return getBrowser().catch(() => null);
+  },
+  login: () => (opts.profile === PERSONAL ? null : readLogin(profileKey(opts))?.url ?? null),
+};
+void live.restore().catch((e) => log(`live view restore failed: ${e?.message ?? e}`));
 
 await server.connect(new StdioServerTransport());
 log(`ready (v${VERSION}, profile ${opts.profile}, mode ${opts.profileMode}${opts.headless ? ', headless' : ''})`);

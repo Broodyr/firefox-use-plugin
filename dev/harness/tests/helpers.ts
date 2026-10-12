@@ -268,4 +268,64 @@ export async function evalTitle(c: McpClient): Promise<string> {
   return r.text.split(' — ')[0];
 }
 
+// ------------------------------------------------------------ live view (liveview.test, proxy.test, personal.test, window.test)
+/** A Server-Sent Events reader (node:http, so any header can be set). */
+export function sse(url: string, headers: Record<string, string> = {}) {
+  const events: { type: string; data: any }[] = [];
+  let waiters: (() => void)[] = [];
+  let status = 0, ended = false;
+  const req = http.get(url, { headers }, (res) => {
+    status = res.statusCode ?? 0;
+    let buf = '';
+    res.setEncoding('utf8');
+    res.on('data', (d: string) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        const type = /^event: (.+)$/m.exec(block)?.[1];
+        const data = /^data: (.+)$/m.exec(block)?.[1];
+        if (type && data) events.push({ type, data: JSON.parse(data) });
+      }
+      for (const w of waiters) w();
+    });
+    const done = () => { ended = true; for (const w of waiters) w(); };
+    res.on('end', done); res.on('close', done); res.on('error', done);
+  });
+  req.on('error', () => { ended = true; for (const w of waiters) w(); });
+  return {
+    events,
+    get status() { return status; },
+    get ended() { return ended; },
+    /** the next event of a type matching pred, after index `from` (default: any so far) */
+    async next(type: string, pred: (d: any) => boolean = () => true, timeoutMs = 10000, from = 0): Promise<any> {
+      const t0 = Date.now();
+      for (;;) {
+        const e = events.slice(from).find((x) => x.type === type && pred(x.data));
+        if (e) return e.data;
+        if (ended) throw new Error(`stream ended before a ${type} event; got ${events.map((x) => x.type).join(',')}`);
+        if (Date.now() - t0 > timeoutMs) throw new Error(`no ${type} event within ${timeoutMs} ms; got ${JSON.stringify(events.slice(-8))}`);
+        await new Promise<void>((r) => { const w = () => { waiters = waiters.filter((x) => x !== w); r(); }; waiters.push(w); setTimeout(w, 200); });
+      }
+    },
+    close() { req.destroy(); },
+  };
+}
+
+/** A request with full control over headers (Host, Sec-Fetch-Site). */
+export function raw(url: string, o: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: Buffer }> {
+  return new Promise((res, rej) => {
+    const req = http.request(url, { method: o.method ?? 'GET', headers: o.headers }, (r) => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c) => chunks.push(c));
+      r.on('end', () => res({ status: r.statusCode ?? 0, headers: r.headers, body: Buffer.concat(chunks) }));
+    });
+    req.on('error', rej);
+    req.end(o.body);
+  });
+}
+
+/** The live view URL in an ff_live_view result. */
+export const liveUrl = (text: string) => /live view: (http:\/\/127\.0\.0\.1:\d+\/live\/[0-9a-f]{32}\/)/.exec(text)![1];
+
 templateProfile = await ensureTemplate();

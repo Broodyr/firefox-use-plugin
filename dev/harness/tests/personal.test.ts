@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { McpClient, killPersonal, makeHome, personalProfile, refFor, startFixtures } from './helpers.ts';
+import { McpClient, killPersonal, liveUrl, makeHome, personalProfile, raw, refFor, sse, startFixtures } from './helpers.ts';
 
 const spawn = async (env: NodeJS.ProcessEnv) => { const c = McpClient.spawnServer(['--profile-mode=throwaway', '--headless'], env); await c.initialize(); return c; };
 
@@ -124,6 +124,25 @@ describe('personal mode', () => {
     await c.call('navigate', { url: fx.url('/frames.html') });
     const f = await c.call('read_page', { filter: 'all' });
     assert.match(f.text, /heading h1 "Second" \(in iframe\)/, f.text);
+  });
+
+  it('live view: frames of Claude\'s tab; the user\'s tabs are never listed, viewable or captured', async () => {
+    await c.call('navigate', { url: fx.url('/page2.html') });
+    const url = liveUrl((await c.call('ff_live_view', { action: 'open' })).text);
+    const s = sse(url + 'events');
+    try {
+      const f = await s.next('frame', (d) => /page2\.html/.test(d.url));
+      assert.equal((await raw(url + 'frame?seq=' + f.seq)).status, 200);
+      const tabs = (await s.next('tabs')).tabs;
+      const user = /tab (\d+) \[USER TAB\]/.exec((await c.call('tabs_list', { include_user: true })).text)!;
+      assert.ok(user);
+      assert.ok(!tabs.some((t: any) => t.tab === Number(user[1])), JSON.stringify(tabs));
+      assert.ok(!tabs.some((t: any) => /errors\.html/.test(t.url)), 'the user\'s tab (named earlier) stays out');
+      const r = await raw(url + 'view', { method: 'POST', headers: { 'x-live-view': '1', 'content-type': 'application/json' }, body: JSON.stringify({ tab: Number(user[1]) }) });
+      assert.equal(r.status, 400, 'a user tab cannot be picked for viewing');
+      assert.ok(s.events.filter((e) => e.type === 'frame').every((e) => !/errors\.html/.test(e.data.url)));
+    } finally { s.close(); }
+    await c.call('ff_live_view', { action: 'close' });
   });
 
   it('a new backend (hot reload) finds Claude\'s window again; ff_quit closes only that window', async () => {

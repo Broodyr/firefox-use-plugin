@@ -18,7 +18,7 @@ Most areas have ONE read tool and ONE write tool, chosen with `kind` (read) or `
 | Lifecycle | `ff_launch`, `ff_status`, `ff_restart`, `ff_quit`, `ff_kill`, `ff_selfcheck` (when a tool says Firefox internals changed) |
 | The user's own Firefox (only on request) | `ff_launch` with `profile: "personal"` — see "Personal mode" below; `promote` puts a userscript / userstyle / filter list into it |
 | Hand to the user | `ff_handoff`, `ff_handback` |
-| Let the user watch / run in the background | `ff_window(action: "show" \| "park")` |
+| Let the user watch / run in the background | `ff_live_view` (a live view page), `ff_window(action: "show" \| "park")` |
 | Tabs | `tabs(op: "list" \| "create" \| "select" \| "close")` |
 | Read the page | `navigate`, `read_page`, `find`, `get_page_text`, `screenshot` |
 | Act | `click`, `type`, `key`, `hover`, `scroll`, `scroll_to`, `drag`, `form_input`, `set_files`, `input`, `resize` |
@@ -52,6 +52,8 @@ Older tool names (`cookies_get`, `us_install`, `wait_for_selector`, …) still w
 - At launch, uBO and Violentmonkey are brought up to the version in the user's main profile if that one is newer. Nothing updates mid-session. The **companion** extension (fast-mode userscripts) is installed as a temporary add-on at every launch.
 - Everything happens in an **agent window parked off-screen**, in a tab group named **Claude**. It never takes focus. Being a normal (not minimised) window, its pages count as visible, so `requestAnimationFrame`, CSS transitions, canvas/WebGL drawing and observers run as for the user, and screenshots show them. If the user minimises it, the next result says so: pages are then hidden and animation-dependent checks are unreliable until they click its taskbar button (Claude can't restore it without taking the foreground).
 - **`ff_window`** when the user wants to watch ("let me see it" -> `show`: on-screen, where it was before, without activating it) or wants it out of the way again ("run it in the background" -> `park`). The choice lasts for the session; config `agentWindow` sets the start (`{ "dev": "offscreen" | "visible" | "minimized", "personal": ... }`). Display only: it never lets you do more. A handback leaves a shown window on-screen.
+- **`ff_live_view`** when the user wants to watch Claude work (or for a demo): `open` returns a URL on 127.0.0.1 with the current tab as a live picture (about 10 frames/s while a call runs), the tool calls, clicks and tabs. If you have the Claude desktop app's built-in browser pane tools, open the URL there (`preview_start` with `url`); otherwise give the user the link. The window stays where it is, so this is the way to watch a parked or headless session. The page has **Take over** (the user takes the browser, as with `ff_handoff`) and Show window / Run in background (`ff_window`). It shows only this session's tabs, and its frames go to the user, never to you: use `screenshot` to see the page yourself. `close` ends it; `status` shows viewers and capture timing.
+- **After a Take over** your next result says `HANDED_OFF: the user took over from the live view …` (a note on a read, an error on a write). Ask the user what they want; call `ff_handback` when they say they're done.
 - `ff_quit` quits gracefully. `ff_restart` restarts and reopens the agent tabs.
 
 ## Tabs

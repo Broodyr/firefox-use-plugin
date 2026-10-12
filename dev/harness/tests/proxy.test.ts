@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { McpClient, PAGES, ROOT, makeHome, startFixtures } from './helpers.ts';
+import { McpClient, PAGES, ROOT, liveUrl, makeHome, raw, sse, startFixtures } from './helpers.ts';
 
 PAGES['/bp.html'] = `<!doctype html><title>bp</title><button id="b">Hit</button><script>
 function hit() {
@@ -78,6 +78,34 @@ describe('hot-reload proxy', () => {
     assert.match(r.text, /^PAUSED during click: paused \(breakpoint bp1\) in hit at http:\/\/127\.0\.0\.1:\d+\/bp\.html:3/, r.text);
     await c.call('resume', {});
     await c.call('bp_remove', { id: 'all' });
+    await c.call('navigate', { url: fx.url('/page2.html') }); // the steps below expect it
+  });
+
+  it('rebuild: the live view URL keeps working (same port and token) and the page gets frames again', async () => {
+    const url = liveUrl((await c.call('ff_live_view', { action: 'open' })).text);
+    let s = sse(url + 'events');
+    await s.next('frame');
+    const pid0 = (await status()).backend.pid;
+    stamp();
+    await c.waitNotification('notifications/tools/list_changed', 30000);
+    assert.notEqual((await status()).backend.pid, pid0);
+    // the old backend dropped the stream; the page reconnects (EventSource retry) to the same URL
+    for (let i = 0; i < 50 && !s.ended; i++) await sleep(100);
+    assert.ok(s.ended, 'the old backend closed the stream');
+    // and retries until the new backend listens (it waits for the old one to let go of the port)
+    for (let i = 0; i < 50; i++) {
+      s = sse(url + 'events');
+      try { await s.next('hello', () => true, 2000); break; } catch { s.close(); await sleep(200); }
+    }
+    try {
+      await s.next('hello');
+      const n0 = s.events.length;
+      await c.call('navigate', { url: fx.url('/form.html') });
+      const f = await s.next('frame', (d) => /form\.html/.test(d.url), 10000, n0);
+      assert.equal((await raw(url + 'frame?seq=' + f.seq)).status, 200);
+      assert.match((await c.call('ff_status', {})).text, new RegExp(`live view: ${url.replace(/[.?]/g, '\\$&')}`));
+    } finally { s.close(); }
+    await c.call('ff_live_view', { action: 'close' });
     await c.call('navigate', { url: fx.url('/page2.html') }); // the steps below expect it
   });
 

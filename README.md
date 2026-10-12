@@ -99,6 +99,8 @@ Ask in plain words. The plugin's skills tell Claude how to work, and load when a
 
 The browser runs in its own window, parked off-screen so it never takes focus; ask Claude to show it if you want to watch ("let me see it", "run it in the background"), or set `agentWindow` in `%LOCALAPPDATA%\firefox-use\config.json` (`{ "dev": "visible" }`). For a login, CAPTCHA or 2FA, Claude hands the window to you and waits; it never types credentials.
 
+**Watch Claude work.** Ask "let me watch" and Claude opens a live view: a page on `127.0.0.1` showing its current tab as it changes, the tool calls as they run, where it clicks and which tabs it has open. In the Claude desktop app it opens in the built-in browser pane; anywhere else you get a link. The window stays out of your way, and the view also works headless and in personal mode. The page is view-only, with three buttons: **Take over** stops Claude and brings its window up on that tab for you (tell Claude in the chat when you're done), and **Show window** / **Run in background** move the window on- or off-screen. Frames are captured only while the page is open, kept in memory, and go to you only: Claude never sees them. Config `liveView` (`{ "quality": 0.6, "activeFps": 10, "autoOpen": false }`) tunes it.
+
 **Personal mode** (optional): when you ask, Claude can also drive your own Firefox, at page level only: no privileged access, extension internals or debugger. It needs a one-time `setup\personal-mode.ps1`, which also adds a "Firefox (Claude can browse)" shortcut. There Claude works in a window of its own that you can watch; it never comes to the front by itself, and pages in it slow down while other windows cover it (Firefox's normal behaviour for hidden windows). To bring a userscript or userstyle built in claude-dev into your Firefox, Claude opens it there and Violentmonkey or Stylus shows its usual install page: you click Install. For uBO filters Claude gives you a list URL to import, or the lines for My filters.
 
 ## Safety
@@ -114,7 +116,7 @@ What to keep in mind:
 
 - **Privileged code has your reach.** `eval_privileged` (and `eval` in the privileged realm, which is checked the same way) runs JavaScript inside Firefox's own chrome, which can read and write files and start programs as you. Approve it the way you would approve a shell command.
 - **Logins persist.** A site you log into in `claude-dev` stays logged in there. Don't sign it into accounts you wouldn't hand to an agent.
-- **Local ports.** While `claude-dev` runs, it listens on local ports (WebDriver BiDi and the devtools server, 127.0.0.1 only) that other programs running as you can connect to.
+- **Local ports.** While `claude-dev` runs, it listens on local ports (WebDriver BiDi and the devtools server, 127.0.0.1 only) that other programs running as you can connect to. A live view adds one more: 127.0.0.1 only, its URL carries a random token, and other websites can't read it or press its buttons. Treat its link like the screen it shows.
 
 ## Development
 

@@ -6,6 +6,7 @@ import { resolveRef } from '../browser/resolve.js';
 import type { Browser } from '../browser/session.js';
 import { fail } from '../errors.js';
 import { refArg, tabArg, tool } from './registry.js';
+import { live } from '../live/liveview.js';
 
 // WebDriver key codes for named keys
 const KEYS: Record<string, string> = {
@@ -57,6 +58,19 @@ async function origin(b: Browser, ctx: string, p: Point, coords: 'screenshot' | 
   return { context: ctx, move: { type: 'pointerMove', x: v.x, y: v.y, origin: 'viewport' }, x: v.x, y: v.y };
 }
 
+/**
+ * Where an input lands, in the top-level viewport's CSS px, for the live view's ripples. Only while someone watches
+ * (a ref costs one page call); null for elements inside frames.
+ */
+async function livePoint(b: Browser, top: string, o: { context: string; move: any; x?: number; y?: number }): Promise<{ x: number; y: number } | null> {
+  if (!live.watching()) return null;
+  if (o.x !== undefined && o.y !== undefined) return { x: o.x, y: o.y };
+  const el = o.move?.origin?.element;
+  if (!el || o.context !== top) return null;
+  const r = await b.callPage(top, '(el) => { const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; }', [el]).catch(() => null);
+  return r ?? null;
+}
+
 const describePoint = (p: Point, o: { x?: number; y?: number }) =>
   typeof p === 'string' ? p : `(${p.x}, ${p.y})${o.x !== undefined && (o.x !== Math.round(p.x) || o.y !== Math.round(p.y)) ? ` = viewport (${o.x}, ${o.y})` : ''}`;
 
@@ -106,6 +120,8 @@ export const inputTools = [
       const { context, move } = o;
       const btn = BUTTONS[a.button];
       const clicks = Array.from({ length: a.count }, () => [{ type: 'pointerDown', button: btn }, { type: 'pointerUp', button: btn }]).flat();
+      const lp = await livePoint(b, top, o);
+      if (lp) live.pointer({ kind: 'click', tab: a.tab ?? b.cur, ...lp });
       await perform(b, context, withModifiers([move, ...clicks], a.modifiers));
       // a click may start a navigation a little later; if one started, wait for the new page (max 5 s)
       await new Promise((r) => setTimeout(r, 200));
@@ -144,6 +160,12 @@ export const inputTools = [
         acts.push({ type: 'keyDown', value: v }, { type: 'keyUp', value: v });
       }
       await perform(b, context, [{ type: 'key', id: 'kbd', actions: acts }]);
+      // the live view marks the focused element's box (never the text)
+      if (live.watching()) {
+        const top = await b.context(a.tab);
+        const r = await b.callPage(top, '() => { const e = document.activeElement; if (!e || e === document.body || e === document.documentElement) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; }').catch(() => null);
+        if (r) live.pointer({ kind: 'type', tab: a.tab ?? b.cur, ...r });
+      }
       return `typed ${[...a.text].length} character(s)${a.ref ? ` into ${a.ref}` : ''}`;
     },
   }),
@@ -177,6 +199,8 @@ export const inputTools = [
       const top = await b.context(a.tab);
       const f = await origin(b, top, a.from, a.coords);
       const t = await origin(b, top, a.to, a.coords);
+      const [lf, lt] = [await livePoint(b, top, f), await livePoint(b, top, t)];
+      if (lf && lt) live.pointer({ kind: 'drag', tab: a.tab ?? b.cur, ...lf, x2: lt.x, y2: lt.y });
       await perform(b, f.context, [{
         type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' },
         actions: [f.move, { type: 'pointerDown', button: 0 }, { type: 'pause', duration: 50 }, { ...t.move, duration: 300 }, { type: 'pointerUp', button: 0 }],
@@ -241,6 +265,10 @@ export const inputTools = [
       } else {
         const vp = await b.callPage(top, '() => ({ w: innerWidth, h: innerHeight })');
         x = Math.round(vp.w / 2); y = Math.round(vp.h / 2);
+      }
+      if (live.watching()) {
+        const lp = org === 'viewport' ? { x, y } : await livePoint(b, top, { context, move: { origin: org } });
+        if (lp) live.pointer({ kind: 'scroll', tab: a.tab ?? b.cur, ...lp });
       }
       const d = a.amount * 100;
       const [deltaX, deltaY] = { up: [0, -d], down: [0, d], left: [-d, 0], right: [d, 0] }[a.direction];

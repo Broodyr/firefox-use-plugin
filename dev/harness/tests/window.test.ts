@@ -4,11 +4,12 @@
 // visible window by default, never the foreground window; covered or minimised is reported. Headed, so opt-in:
 // CF_TEST_HEADED=1 (launching a headed Firefox can take the foreground for about a second; nothing after the launch should).
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { McpClient, killPersonal, makeHome, personalProfile, startFixtures } from './helpers.ts';
+import { McpClient, PAGES, killPersonal, liveUrl, makeHome, personalProfile, raw, sse, startFixtures } from './helpers.ts';
 
 const PROBE = '<title>probe</title><div id=b style="width:10px;height:10px;background:red;transition:transform 0.5s linear"></div>'
   + '<script>let n=0;function f(){n++;requestAnimationFrame(f)}requestAnimationFrame(f);setInterval(()=>{window.rate=n;n=0},1000)</script>';
@@ -74,7 +75,14 @@ public class FW { public delegate bool CB(IntPtr h, IntPtr l);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
 [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
 public static string T(IntPtr h) { var sb = new StringBuilder(400); GetWindowText(h, sb, 400); return sb.ToString(); }
-public static int Min(string part) { int n = 0; EnumWindows((h, l) => { if (T(h).Contains(part)) { ShowWindow(h, 6); n++; } return true; }, IntPtr.Zero); return n; } }
+public static int Min(string part) { int n = 0; EnumWindows((h, l) => { if (T(h).Contains(part)) { ShowWindow(h, 6); n++; } return true; }, IntPtr.Zero); return n; }
+public static int Res(string part) { int n = 0; EnumWindows((h, l) => { if (T(h).Contains(part)) { ShowWindow(h, 4); n++; } return true; }, IntPtr.Zero); return n; }
+[DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+public static int Left(IntPtr h) { RECT r; GetWindowRect(h, out r); return r.L; }
+public static string Z() { var sb = new StringBuilder(); EnumWindows((h, l) => { if (IsWindowVisible(h)) { var t = T(h); if (t.Length > 0) sb.Append((IsIconic(h) ? "[min] " : "") + t + "|"); } return true; }, IntPtr.Zero); return sb.ToString(); } }
 "@
 `;
 const ps = (cmd: string) => execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', WIN32 + cmd], { encoding: 'utf8', windowsHide: true }).trim();
@@ -82,6 +90,14 @@ const ps = (cmd: string) => execFileSync('powershell', ['-NoProfile', '-NonInter
 const foreground = () => ps('[FW]::T([FW]::GetForegroundWindow())');
 /** minimise (SW_MINIMIZE, no activation) the windows whose title contains part, as the user would */
 const minimize = (part: string) => Number(ps(`[FW]::Min('${part}')`));
+/** restore those windows without activating them (SW_SHOWNOACTIVATE) */
+const restore = (part: string) => Number(ps(`[FW]::Res('${part}')`));
+/**
+ * visible top-level windows with a title, front to back ("[min] " = minimised). Titles of windows that aren't the
+ * test's own probes are the user's (mail, chats, pages): only a hash of them is kept, never printed.
+ */
+const zOrder = () => ps('[FW]::Z()').split('|').filter(Boolean).map((t) => /probe|lv-[ab]/.test(t) ? t
+  : `${t.startsWith('[min] ') ? '[min] ' : ''}window#${crypto.createHash('sha1').update(t).digest('hex').slice(0, 8)}`);
 
 describe('ff_window in claude-dev', { skip: !process.env.CF_TEST_HEADED && 'headed: set CF_TEST_HEADED=1' }, () => {
   let c: McpClient, h: ReturnType<typeof makeHome>;
@@ -215,5 +231,128 @@ describe('personal mode window', { skip: !process.env.CF_TEST_HEADED && 'headed:
     const t = await c.call('tabs', { op: 'list' });
     // the note rides on the first result after the check (the launch, ff_status or this one)
     assert.match(r.text + st + t.text, /note: Claude's window in the user's Firefox is minimised/);
+  });
+});
+
+const control = (url: string, what: string, body: unknown = {}) => raw(url + what, { method: 'POST', headers: { 'x-live-view': '1', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+describe('live view Take over in claude-dev', { skip: !process.env.CF_TEST_HEADED && 'headed: set CF_TEST_HEADED=1' }, () => {
+  let c: McpClient, h: ReturnType<typeof makeHome>;
+  before(async () => { h = makeHome(); c = McpClient.spawnServer(['--profile-mode=throwaway'], h.env); await c.initialize(); });
+  after(async () => { await c.close(); h.cleanup(); });
+  const where = async () => JSON.parse(/\{[\s\S]*\}/.exec((await c.call('eval_privileged', { code: FIND + ` const { ctypes } = ChromeUtils.importESModule('resource://gre/modules/ctypes.sys.mjs');
+    const u = ctypes.open('user32.dll'); const fg = u.declare('GetForegroundWindow', ctypes.winapi_abi, ctypes.voidptr_t)();
+    const n = Number(ctypes.cast(fg, ctypes.uintptr_t).value.toString()); u.close();
+    if (!w.__lvStates) { w.__lvStates = []; w.addEventListener('sizemodechange', () => w.__lvStates.push(w.windowState)); }
+    return { x: w.screenX, state: w.windowState, selected: w.gBrowser.selectedTab.label, states: w.__lvStates, fg: n === Number(w.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow).nativeHandle) }` })).text)![0]);
+
+  it('shows the parked agent window on the viewed tab, no minimise/restore; ff_handback parks it again', async () => {
+    await c.call('navigate', { url: 'data:text/html,<title>lv-a</title>A' });
+    await c.call('tabs', { op: 'create', url: 'data:text/html,<title>lv-b</title>B' });
+    let w = await where();
+    assert.equal(w.x, -20000, 'parked');
+    const url = liveUrl((await c.call('ff_live_view', { action: 'open' })).text);
+    const s = sse(url + 'events');
+    try {
+      const tabs = (await s.next('tabs', (d) => d.tabs.length === 2)).tabs;
+      const a = tabs.find((t: any) => t.title === 'lv-a').tab;
+      assert.equal((await control(url, 'view', { tab: a })).status, 200);
+      const r = await control(url, 'takeover');
+      assert.equal(r.status, 200, r.body.toString());
+      await new Promise((res) => setTimeout(res, 500));
+      // while handed off, Claude's privileged tools are refused: read the window from the OS (its title is the tab's)
+      let os = '';
+      for (let i = 0; i < 15 && !/lv-a/.test(os); i++) { os = zOrder().find((t) => /lv-[ab]/.test(t)) ?? ''; if (!/lv-a/.test(os)) await new Promise((res) => setTimeout(res, 200)); }
+      assert.match(os, /lv-a/, `on the tab being viewed, not minimised: ${os}`);
+      const rect = ps(`$r = 0; [FW]::EnumWindows({ param($h, $l) if ([FW]::T($h) -like 'lv-a*') { $script:r = [FW]::Left($h) }; return $true }, [IntPtr]::Zero) | Out-Null; $r`);
+      assert.ok(Number(rect) > -10000, `on-screen (left ${rect})`);
+      await s.next('state', (d) => d.state === 'handed-off');
+      const click = await c.call('click', { target: { x: 5, y: 5 }, coords: 'viewport' });
+      assert.match(click.text, /HANDED_OFF\nthe user took over from the live view .* on tab \d+/);
+      assert.match((await c.call('tabs', { op: 'list' })).text, /\* tab \d+: "lv-a"/, 'the viewed tab is now Claude\'s current tab');
+      await c.call('ff_handback', {});
+      w = await where();
+      assert.deepEqual(w.states, [], 'never minimised or restored on the way');
+      assert.equal(w.state, 3, 'a normal window');
+      assert.equal(w.x, -20000, 'parked again');
+      assert.equal(w.fg, false, 'the foreground handed back');
+    } finally { s.close(); }
+  });
+
+  it('Show window / Run in background: on-screen and off-screen again, never activated', async () => {
+    const url = liveUrl((await c.call('ff_live_view', { action: 'open' })).text);
+    let r = await control(url, 'window', { action: 'show' });
+    assert.equal(r.status, 200, r.body.toString());
+    let w = await where();
+    assert.ok(w.x > -10000);
+    assert.equal(w.fg, false);
+    r = await control(url, 'window', { action: 'park' });
+    assert.equal(r.status, 200, r.body.toString());
+    w = await where();
+    assert.equal(w.x, -20000);
+    assert.match((await c.call('ff_audit_show', { tool: 'live_view_window' })).text, /live_view_window ok/);
+  });
+});
+
+describe('live view Take over in personal mode', { skip: !process.env.CF_TEST_HEADED && 'headed: set CF_TEST_HEADED=1' }, () => {
+  let c: McpClient, h: ReturnType<typeof makeHome>, fx: Awaited<ReturnType<typeof startFixtures>>;
+  const USER = `user-window-probe-${process.pid}`, CLAUDE = `claude-takeover-probe-${process.pid}`;
+  PAGES['/user-window.html'] = `<!doctype html><title>${USER}</title>the user's window`;
+  PAGES['/claude-window.html'] = `<!doctype html><title>${CLAUDE}</title>Claude's window`;
+  before(async () => {
+    fx = await startFixtures();
+    h = makeHome((cfg, home) => {
+      personalProfile()(cfg, home);
+      fs.appendFileSync(path.join(home, 'personal-profile', 'user.js'), 'user_pref("taskbar.grouping.useprofile", true);\n');
+    });
+    c = McpClient.spawnServer(['--profile-mode=throwaway'], { ...h.env, FIREFOX_USE_PROXY_PID: String(process.pid) });
+    await c.initialize();
+  });
+  after(async () => { await c.close(); killPersonal(h.home); fx.close(); h.cleanup(); });
+
+  it('restores Claude\'s minimised window; the user\'s own Firefox windows are neither restored nor raised', async () => {
+    let r = await c.call('ff_launch', { profile: 'personal', headless: false });
+    assert.ok(!r.isError, r.text);
+    // the window Firefox opened at launch stands in for the user's own
+    const user = /tab (\d+) \[USER TAB\]/.exec((await c.call('tabs_list', { include_user: true })).text)!;
+    r = await c.call('navigate', { tab: Number(user[1]), url: fx.url('/user-window.html') });
+    assert.ok(!r.isError, r.text);
+    r = await c.call('navigate', { url: fx.url('/claude-window.html') });
+    assert.ok(!r.isError, r.text);
+    await c.call('ff_window', { action: 'park' }); // minimised
+    const url = liveUrl((await c.call('ff_live_view', { action: 'open' })).text);
+    const s = sse(url + 'events');
+    try {
+      await s.next('frame', (d) => d.title === CLAUDE);
+      // case 1: the user's window minimised: it stays minimised
+      assert.ok(minimize(USER) >= 1);
+      await new Promise((res) => setTimeout(res, 500));
+      r = await control(url, 'takeover');
+      assert.equal(r.status, 200, r.body.toString());
+      await new Promise((res) => setTimeout(res, 1000));
+      let after = zOrder();
+      assert.ok(after.some((t) => t.includes(CLAUDE) && !t.startsWith('[min]')), `Claude's window restored: ${after.join(' | ')}`);
+      // activation is asked for (as ff_handoff); Windows grants it unless the user is busy in another app (then the
+      // taskbar button flashes), so it is reported, not asserted
+      for (let i = 0; i < 10 && !foreground().includes(CLAUDE); i++) await new Promise((res) => setTimeout(res, 200));
+      process.stderr.write(`take over (personal): Claude's window ${foreground().includes(CLAUDE) ? 'is' : 'is NOT'} the foreground window\n`);
+      assert.ok(after.some((t) => t.startsWith('[min]') && t.includes(USER)), `the user's window stays minimised: ${after.join(' | ')}`);
+      await c.call('ff_handback', {}); // minimised mode: minimised again
+      // case 2: the user's window open behind other windows: what was above it stays above it
+      restore(USER);
+      await new Promise((res) => setTimeout(res, 800));
+      const before = zOrder();
+      const iu = before.findIndex((t) => t.includes(USER));
+      const above = before.slice(0, iu).filter((t) => !t.includes(CLAUDE) && !t.startsWith('[min]'));
+      r = await control(url, 'takeover');
+      assert.equal(r.status, 200, r.body.toString());
+      await new Promise((res) => setTimeout(res, 1000));
+      after = zOrder();
+      const ju = after.findIndex((t) => t.includes(USER));
+      const raised = above.filter((t) => after.indexOf(t) > ju);
+      process.stderr.write(`z-order (front to back) before: ${before.slice(0, 8).join(' | ')}\nafter: ${after.slice(0, 8).join(' | ')}\n`);
+      assert.deepEqual(raised, [], `the user's window moved above: ${raised.join(' | ')}`);
+      await c.call('ff_handback', {});
+    } finally { s.close(); }
   });
 });

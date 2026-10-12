@@ -259,6 +259,8 @@ export class StylusSync {
   private async push(rel: string) {
     if (this.b.dead) return;
     await runAsClient(this.client, async () => {
+      // the user has the browser (ff_handoff, Take over in the live view): push once they hand it back
+      if (this.b.handoff) { this.pending.set(rel, setTimeout(() => { this.pending.delete(rel); void this.push(rel); }, 2000)); return; }
       const state = readStyleState();
       const l = state.links[rel];
       const abs = path.join(this.ws, rel);
