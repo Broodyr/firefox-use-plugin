@@ -1,0 +1,39 @@
+# The core suite on the next Firefox: Beta becomes the release at the next four-week cycle, so a change in a Firefox
+# internal the plugin relies on shows up here about a month before it reaches users. Weekly, and by hand (another
+# channel or version: latest-nightly, latest-devedition, latest, 159.0, ...). ff_selfcheck runs in the suite
+# (internals.test.ts) and names each broken internal.
+name: firefox beta
+
+on:
+  schedule:
+    - cron: '23 5 * * 1' # Mondays
+  push:
+    branches: [main]
+    paths: ['.github/workflows/firefox-beta.yml'] # a changed job runs once
+  workflow_dispatch:
+    inputs:
+      firefox:
+        description: 'Firefox to test (browser-actions/setup-firefox: latest-beta, latest-nightly, latest, 159.0, ...)'
+        default: latest-beta
+
+jobs:
+  core:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: browser-actions/setup-firefox@v1
+        id: firefox
+        with:
+          firefox-version: ${{ inputs.firefox || 'latest-beta' }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:setup
+      - name: Core suite on Firefox ${{ steps.firefox.outputs.firefox-version }}
+        env:
+          FIREFOX_USE_TEST_FIREFOX: ${{ steps.firefox.outputs.firefox-path }}
+        run: npm run test:core

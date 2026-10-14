@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { detectMainProfile, loadConfig } from '../config.js';
 import type { Browser } from './session.js';
+import { RECOMMENDED } from './internals.js';
 
 /** user_pref values of a profile's prefs.js (strings, numbers, booleans). */
 export function readUserPrefs(dir: string | null | undefined): Map<string, unknown> {
@@ -23,13 +24,7 @@ export function readUserPrefs(dir: string | null | undefined): Map<string, unkno
 }
 
 const UNSTICK = `async ({ keepIfMain, keepUserJs }) => {
-  const { RecommendedPreferences } = ChromeUtils.importESModule("chrome://remote/content/shared/RecommendedPreferences.sys.mjs");
-  const src = await (await fetch("chrome://remote/content/shared/RecommendedPreferences.sys.mjs")).text();
-  const start = src.indexOf("const COMMON_PREFERENCES");
-  if (start < 0 || !RecommendedPreferences || typeof RecommendedPreferences.applyPreferences !== "function") throw new Error("RecommendedPreferences internals changed");
-  const block = src.slice(start, src.indexOf("]);", start));
-  const recommended = [];
-  for (const m of block.matchAll(/\\[\\s*"([^"]+)",\\s*(true|false|-?\\d+|"(?:[^"\\\\]|\\\\.)*")\\s*,?\\s*\\]/g)) recommended.push([m[1], JSON.parse(m[2])]);
+  ${RECOMMENDED}
   const read = (k) => { const t = Services.prefs.getPrefType(k); return t === 32 ? Services.prefs.getStringPref(k) : t === 64 ? Services.prefs.getIntPref(k) : t === 128 ? Services.prefs.getBoolPref(k) : undefined; };
   const stuck = recommended.filter(([k, v]) => Services.prefs.prefHasUserValue(k) && !RecommendedPreferences.alteredPrefs.has(k) && read(k) === v && !(k in keepIfMain && keepIfMain[k] === v) && !keepUserJs.includes(k));
   for (const [k] of stuck) Services.prefs.clearUserPref(k);

@@ -11,14 +11,14 @@ export interface MsgEntry { ts: number; kind: string; from: string; to: string; 
 
 const STORE = `const { BroadcastConduit } = ChromeUtils.importESModule("resource://gre/modules/ConduitsParent.sys.mjs"); const L = BroadcastConduit.prototype.__cfMsgLog;`;
 
-const INSTALL = `({ ids }) => {
+export const MSGLOG_INSTALL = `({ ids }) => {
   const { BroadcastConduit } = ChromeUtils.importESModule("resource://gre/modules/ConduitsParent.sys.mjs");
   const proto = BroadcastConduit.prototype;
   const base = proto._recv;
   if (typeof base !== "function") throw new Error("BroadcastConduit._recv not found in this Firefox (internals changed)");
   let L = proto.__cfMsgLog;
   if (!L) {
-    L = proto.__cfMsgLog = { ids: new Set(), log: [], ports: new Map() };
+    L = proto.__cfMsgLog = { ids: new Set(), log: [], ports: new Map(), errors: 0, firstError: null };
     const text = (holder, v) => {
       try { const x = holder && typeof holder.deserialize === "function" ? holder.deserialize(globalThis, true) : v; const s = JSON.stringify(x); return s === undefined ? String(x) : s; } catch (e) { return "[" + (e && e.message || "unserializable") + "]"; }
     };
@@ -49,7 +49,11 @@ const INSTALL = `({ ids }) => {
           const id = (port && port.id) || (s && s.extensionId) || (s && s.id);
           push(id, "port", who(s), "port \\"" + (port ? port.name : "?") + "\\"", text(arg && arg.holder));
         }
-      } catch (e) {}
+      } catch (e) {
+        // counted and shown by ext_dev_inspect: a changed message shape must not look like "no messages"
+        L.errors++;
+        if (!L.firstError) L.firstError = String(e && e.message || e);
+      }
       return p;
     };
   }
@@ -62,7 +66,7 @@ export function messagingLog(b: Browser) {
   b.adapters.set('msgLogIds', watched);
   return {
     async start(id: string) {
-      try { await b.callChrome(INSTALL, { ids: [id] }); } catch (e: any) { fail('UNSUPPORTED', `messaging log unavailable: ${e.message}`); }
+      try { await b.callChrome(MSGLOG_INSTALL, { ids: [id] }); } catch (e: any) { fail('UNSUPPORTED', `messaging log unavailable: ${e.message}`); }
       watched.add(id);
     },
     async stop(id: string) {
@@ -71,10 +75,13 @@ export function messagingLog(b: Browser) {
     },
     watching: (id: string) => watched.has(id),
     entries(id: string): MsgEntry[] { return (b.adapters.get(`msgLog:${id}`) as MsgEntry[] | undefined) ?? []; },
+    /** Messages the hook could not log since it was installed (a changed message shape), and the first error. */
+    hookErrors(): { errors: number; firstError?: string } { return (b.adapters.get('msgLogErrors') as { errors: number; firstError?: string } | undefined) ?? { errors: 0 }; },
     /** Pull new entries from the browser (kept per extension here, masked). */
     async pull(): Promise<void> {
-      const got = await b.callChrome<any[]>(`() => { ${STORE} return L ? L.log.splice(0) : []; }`).catch(() => []);
-      for (const m of got) {
+      const got = await b.callChrome<{ log: any[]; errors: number; firstError: string | null }>(`() => { ${STORE} return L ? { log: L.log.splice(0), errors: L.errors || 0, firstError: L.firstError || null } : { log: [], errors: 0, firstError: null }; }`).catch(() => ({ log: [], errors: 0, firstError: null }));
+      if (got.errors) b.adapters.set('msgLogErrors', { errors: got.errors, firstError: got.firstError ?? undefined });
+      for (const m of got.log) {
         const k = `msgLog:${m.id}`;
         const list = (b.adapters.get(k) as MsgEntry[] | undefined) ?? [];
         list.push({ ts: m.ts, kind: m.kind, from: m.from, to: m.to, text: maskText(m.text) });
@@ -83,4 +90,30 @@ export function messagingLog(b: Browser) {
       }
     },
   };
+}
+
+/**
+ * ff_selfcheck: a runtime message sent by extension `id` (through `send`) must reach the hook as a "message" entry.
+ * The probe's own entries are dropped, and the extension stops being watched unless it was before.
+ */
+export async function msglogProbe(b: Browser, id: string, send: () => Promise<unknown>): Promise<true | string> {
+  const was = await b.callChrome<boolean>(`({ id }) => { ${STORE} return !!L && L.ids.has(id); }`, { id });
+  await b.callChrome(MSGLOG_INSTALL, { ids: [id] });
+  try {
+    await send();
+    for (let i = 0; i < 20; i++) {
+      const r = await b.callChrome<{ hit: boolean; errors: number; firstError: string | null }>(`({ id }) => { ${STORE}
+        const mine = (m) => m.id === id && /__ffSelfcheck/.test(m.text);
+        const hit = L.log.some((m) => mine(m) && m.kind === "message");
+        if (hit) L.log = L.log.filter((m) => !mine(m));
+        return { hit, errors: L.errors || 0, firstError: L.firstError || null };
+      }`, { id });
+      if (r.hit) return true;
+      if (r.errors) return `the hook failed on a message: ${r.firstError}`;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    return 'a runtime message from the extension never reached the hook (message names or the conduit changed)';
+  } finally {
+    if (!was) await b.callChrome(`({ id }) => { ${STORE} if (L) L.ids.delete(id); return true; }`, { id }).catch(() => {});
+  }
 }

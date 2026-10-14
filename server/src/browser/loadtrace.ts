@@ -68,7 +68,7 @@ const INSTALL = `(() => {
   return 'ok';
 })()`;
 
-/** ff_selfcheck: the tracer's Debugger calls on a content-principal sandbox in the parent process (true or an error). */
+/** ff_selfcheck: the tracer's Debugger calls (and the breakpoint-column ones) on a content-principal sandbox in the parent process (true or an error). */
 export const TRACER_PROBE = `() => {
   const { addDebuggerToGlobal } = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs");
   const sb = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true });
@@ -88,10 +88,17 @@ export const TRACER_PROBE = `() => {
       } catch (e) { got = { error: String(e && e.message || e) }; }
     };
     Cu.evalInSandbox("var selfcheck = 1;", target, null, "selfcheck-probe.js", 7);
-  } finally { dbg.onEnterFrame = undefined; dbg.removeAllDebuggees(); }
-  if (!got) return "onEnterFrame never fired";
-  if (got.error) return "frame inspection failed: " + got.error;
-  return (got.url === "selfcheck-probe.js" && got.line === 7) || "unexpected frame " + JSON.stringify(got);
+    if (!got) return "onEnterFrame never fired";
+    if (got.error) return "frame inspection failed: " + got.error;
+    if (got.url !== "selfcheck-probe.js" || got.line !== 7) return "unexpected frame " + JSON.stringify(got);
+    // the debugger's breakpoint columns (debugger.ts firstBreakable) use the same Debugger.Script API
+    const fn = Cu.evalInSandbox("(function () {\\n  var a = 1;\\n})", target, null, "selfcheck-bp.js", 1);
+    const script = dbg.addDebuggee(target).makeDebuggeeValue(fn).script;
+    const cols = script.getPossibleBreakpoints({ line: 2 }).map((p) => p.columnNumber);
+    if (!cols.length || typeof script.getChildScripts !== "function") return "breakpoint positions changed: " + JSON.stringify(cols);
+    return true;
+  } catch (e) { return "Debugger API failed: " + (e && e.message || e); }
+  finally { dbg.onEnterFrame = undefined; dbg.removeAllDebuggees(); Cu.nukeSandbox(target); }
 }`;
 
 const COLLECT = `(() => {

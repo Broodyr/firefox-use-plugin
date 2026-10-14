@@ -5,6 +5,7 @@ import { ToolError, fail } from '../errors.js';
 import { extCall, resolveExtension, type ExtRef } from '../browser/realms.js';
 import { sleep } from '../browser/launcher.js';
 import type { Browser } from '../browser/session.js';
+import { TAB_TRACKER } from '../browser/internals.js';
 
 export const UBO_ID = 'uBlock0@raymondhill.net';
 
@@ -92,15 +93,13 @@ export async function uboLint(b: Browser, lines: string[]): Promise<LintResult[]
 
 // ------------------------------------------------------------ tab id mapping (uBO tab ids are WebExtension tab ids)
 const TAB_IDS = `({ tabIds }) => {
-  const { ExtensionParent } = ChromeUtils.importESModule("resource://gre/modules/ExtensionParent.sys.mjs");
-  const tt = ExtensionParent.apiManager.global.tabTracker;
+  ${TAB_TRACKER}
   const out = {};
   for (const id of tabIds) { try { const t = tt.getTab(id, null); out[id] = t ? t.linkedBrowser.browserId : null; } catch { out[id] = null; } }
   return out;
 }`;
 const EXT_TAB_ID = `({ bid }) => {
-  const { ExtensionParent } = ChromeUtils.importESModule("resource://gre/modules/ExtensionParent.sys.mjs");
-  const tt = ExtensionParent.apiManager.global.tabTracker;
+  ${TAB_TRACKER}
   for (const w of Services.wm.getEnumerator("navigator:browser")) for (const t of w.gBrowser.tabs) if (t.linkedBrowser.browserId === bid) return tt.getId(t);
   return null;
 }`;

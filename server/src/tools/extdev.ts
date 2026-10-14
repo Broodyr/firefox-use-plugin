@@ -31,17 +31,6 @@ function devExts(b: Browser): Map<string, DevExt> {
   return m;
 }
 
-/** Firefox's own manifest validation (what a temporary install would say), without installing. */
-const VALIDATE = `async ({ path }) => {
-  const { ExtensionData } = ChromeUtils.importESModule("resource://gre/modules/Extension.sys.mjs");
-  const { FileUtils } = ChromeUtils.importESModule("resource://gre/modules/FileUtils.sys.mjs");
-  const data = new ExtensionData(Services.io.newFileURI(new FileUtils.File(path)));
-  let manifest = null, thrown = null;
-  try { manifest = await data.loadManifest(); } catch (e) { thrown = String(e && e.message || e); }
-  const m = manifest || data.manifest || {};
-  return { thrown, errors: (data.errors || []).map(String), warnings: (data.warnings || []).map(String), id: data.id || null, name: m.name || null, version: m.version || null, mv: m.manifest_version || null };
-}`;
-
 interface Validation { thrown: string | null; errors: string[]; warnings: string[]; id: string | null; name: string | null; version: string | null; mv: number | null }
 
 /** Errors the extension's own realms logged since `from` (background, pages, content scripts, workers), in the
@@ -60,7 +49,7 @@ async function reloadDev(b: Browser, dev: DevExt, trigger: string): Promise<Relo
   const from = d.cursor;
   const t0 = Date.now();
   const r: Reload = { at: t0, trigger, ok: true, ms: 0, errors: [] };
-  const v = await b.callChrome<Validation>(VALIDATE, { path: dev.dir }).catch((e) => ({ thrown: String(e.message), errors: [], warnings: [] } as unknown as Validation));
+  const v = await b.callChrome<Validation>(XS.MANIFEST_VALIDATE, { path: dev.dir }).catch((e) => ({ thrown: String(e.message), errors: [], warnings: [] } as unknown as Validation));
   if (v.thrown || v.errors.length) {
     // Firefox would refuse the new manifest: keep the running version
     r.ok = false;
@@ -147,7 +136,7 @@ export const extDevTools = [
         if (!a.watch && existing.watcher) { existing.watcher.close(); existing.watcher = null; }
         return [`${existing.name} (${existing.id}) from ${a.path}: ${existing.watcher ? 'watching for changes' : 'not watching'}`, ...existing.reloads.slice(-8).map(reloadLine)].join('\n');
       }
-      const v = await b.callChrome<Validation>(VALIDATE, { path: abs });
+      const v = await b.callChrome<Validation>(XS.MANIFEST_VALIDATE, { path: abs });
       if (v.thrown || v.errors.length) fail('MANIFEST_INVALID', `Firefox refuses ${a.path}/manifest.json: ${[v.thrown, ...v.errors].filter(Boolean).join('; ')}`, 'Fix the manifest; ext_dev_lint shows every problem.');
       const d = await b.dt();
       const from = d.cursor;
@@ -174,7 +163,7 @@ export const extDevTools = [
     async handler(a, ctx) {
       const abs = checkUploadPath(a.path);
       const b = await ctx.browser();
-      const v = await b.callChrome<Validation>(VALIDATE, { path: abs });
+      const v = await b.callChrome<Validation>(XS.MANIFEST_VALIDATE, { path: abs });
       const lines = [`Firefox: ${v.thrown || v.errors.length ? 'REFUSES the manifest' : 'manifest OK'}${v.name ? ` (${v.name} ${v.version ?? ''}, MV${v.mv})` : ''}`];
       for (const e of [v.thrown, ...v.errors].filter(Boolean)) lines.push(`  error: ${e}`);
       for (const w of v.warnings) lines.push(`  warning: ${w}`);
@@ -255,6 +244,8 @@ export const extDevTools = [
       if (a.messages === 'on') { await log.start(ext.id); lines.push('messaging log: on (runtime messages and port traffic of this extension)'); }
       if (a.messages === 'off') { await log.stop(ext.id); lines.push('messaging log: off'); }
       const entries = log.entries(ext.id);
+      const hook = log.hookErrors();
+      if (hook.errors) lines.push(`messaging log: ${hook.errors} message(s) of watched extensions could not be logged (${hook.firstError}); a Firefox update may have changed its messaging internals: run ff_selfcheck`);
       if (entries.length || log.watching(ext.id)) {
         lines.push(`messages (${entries.length}${log.watching(ext.id) ? ', logging' : ''}):`);
         for (const m of entries.slice(-a.limit)) lines.push(`  ${clock(m.ts)} ${m.kind} ${m.from} -> ${m.to}: ${m.text}`);

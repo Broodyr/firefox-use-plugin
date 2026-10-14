@@ -1,30 +1,24 @@
 // ff_selfcheck: every undocumented Firefox internal the plugin relies on, probed in a few seconds, so a Firefox
-// update says which features broke at launch (pins detect the version change) instead of failing mid-task.
+// update says which features broke at launch (the first launch on a new build runs it) instead of failing mid-task.
+// The chrome probes live with the snippets they check (browser/internals.ts); here also the devtools hub, the
+// debugger, the messaging log (a real message from the companion) and the adapters.
+import fs from 'node:fs';
+import path from 'node:path';
 import { STYLUS_ID, stylusApi } from '../adapters/stylus.js';
+import { loadConfig } from '../config.js';
 import { tool } from './registry.js';
 import type { Browser } from '../browser/session.js';
 import { FIRST_STATEMENT, debuggerFor, debuggerIfRunning } from '../browser/debugger.js';
-import { vmScripts } from '../adapters/violentmonkey.js';
-import { TRACER_PROBE } from '../browser/loadtrace.js';
-
-/** [feature, privileged probe returning true or an error text] */
-const CHROME_PROBES: [string, string][] = [
-  ['tab handles (NavigableManager)', `() => { const { NavigableManager: N } = ChromeUtils.importESModule("chrome://remote/content/shared/NavigableManager.sys.mjs"); return typeof N.getBrowsingContextById === "function" && typeof N.getIdForBrowser === "function" || "NavigableManager API changed"; }`],
-  ['tab groups (gBrowser.addTabGroup)', `() => { const w = Services.wm.getMostRecentWindow("navigator:browser"); return typeof w.gBrowser.addTabGroup === "function" && typeof w.gBrowser.getTabGroupById === "function" || "tab group API changed"; }`],
-  ['read_page (accessibility service)', `() => !!Cc["@mozilla.org/accessibilityService;1"].getService(Ci.nsIAccessibilityService) || "no accessibility service"`],
-  ['extension storage (ExtensionStorageIDB)', `() => { const { ExtensionStorageIDB } = ChromeUtils.importESModule("resource://gre/modules/ExtensionStorageIDB.sys.mjs"); return typeof ExtensionStorageIDB.open === "function" || "ExtensionStorageIDB.open missing"; }`],
-  ['userScripts grant (ExtensionPermissions)', `() => { const { ExtensionPermissions } = ChromeUtils.importESModule("resource://gre/modules/ExtensionPermissions.sys.mjs"); return typeof ExtensionPermissions.add === "function" || "ExtensionPermissions.add missing"; }`],
-  ['ext_dev_lint (ExtensionData.loadManifest)', `() => { const { ExtensionData } = ChromeUtils.importESModule("resource://gre/modules/Extension.sys.mjs"); return typeof ExtensionData.prototype.loadManifest === "function" || "loadManifest missing"; }`],
-  ['messaging log (BroadcastConduit._recv)', `() => { const { BroadcastConduit } = ChromeUtils.importESModule("resource://gre/modules/ConduitsParent.sys.mjs"); return typeof BroadcastConduit.prototype._recv === "function" || "_recv missing"; }`],
-  ['leftover automation prefs (RecommendedPreferences)', `async () => { const { RecommendedPreferences: R } = ChromeUtils.importESModule("chrome://remote/content/shared/RecommendedPreferences.sys.mjs"); const src = await (await fetch("chrome://remote/content/shared/RecommendedPreferences.sys.mjs")).text(); return (R && typeof R.alteredPrefs?.has === "function" && typeof R.applyPreferences === "function" && src.includes("const COMMON_PREFERENCES")) || "RecommendedPreferences changed"; }`],
-  ['trace_load tracer (Debugger frames and line lookup)', TRACER_PROBE],
-  ['orphan BiDi session cleanup (RemoteAgent)', `() => { const { RemoteAgent } = ChromeUtils.importESModule("chrome://remote/content/components/RemoteAgent.sys.mjs"); return typeof RemoteAgent.webDriverBiDi?.deleteSession === "function" || "deleteSession missing"; }`],
-];
+import { VM_ID, vmScripts } from '../adapters/violentmonkey.js';
+import { PROBES } from '../browser/internals.js';
+import { msglogProbe } from '../browser/msglog.js';
+import { COMPANION_DIR, COMPANION_ID, compCall } from '../adapters/companion.js';
 
 export async function runSelfcheck(b: Browser): Promise<{ ok: string[]; broken: string[] }> {
   const ok: string[] = [], broken: string[] = [];
   const add = (name: string, r: unknown) => (r === true ? ok.push(name) : broken.push(`${name}: ${r}`));
-  for (const [name, fn] of CHROME_PROBES) add(name, await b.callChrome(fn).catch((e) => String(e.message)));
+  for (const p of PROBES) add(p.feature, await b.callChrome(p.code, { id: COMPANION_ID, path: COMPANION_DIR }).catch((e) => String(e.message)));
+  add('messaging log (ProxyMessenger conduit hook)', await msglogProbe(b, COMPANION_ID, () => compCall(b, 'try { await browser.runtime.sendMessage({ __ffSelfcheck: 1 }); } catch (e) {} return true;')).catch((e) => String(e.message)));
   // devtools hub and the debugger connection (breakpoints, positions, first-statement event)
   add('console/network/realms (devtools hub)', await b.dt().then((d) => !d.dead || 'hub down', (e) => String(e.message)));
   const started = !debuggerIfRunning(b);
@@ -42,6 +36,28 @@ export async function runSelfcheck(b: Browser): Promise<{ ok: string[]; broken: 
     add('Stylus API (styles.getCore, usercss.build)', await stylusApi(b, 'styles.getCore', [{ id: -1 }]).then(() => stylusApi(b, 'usercss.build', [probe, { metaOnly: true }])).then(() => true, (e) => String(e.message)));
   }
   return { ok, broken };
+}
+
+/**
+ * At the launch of a lasting profile: run the self-check when Firefox's build (or Violentmonkey's / Stylus's
+ * version, which the adapter probes use) differs from the last passing check for this profile, recorded in the
+ * run dir (run/selfcheck.json), so the first launch after any update checks once, whatever the workspace. A
+ * failing check is not recorded as passed: it runs (and is reported) again at each launch until it passes.
+ */
+export async function selfcheckAtLaunch(b: Browser, profile: string): Promise<string | null> {
+  const v = b.versions ?? await b.versionsInfo();
+  const addon = (id: string) => v.addons?.find((a: any) => a.id === id)?.version ?? 'none';
+  const key = `Firefox ${v.firefox} (build ${v.buildId}), Violentmonkey ${addon(VM_ID)}, Stylus ${addon(STYLUS_ID)}`;
+  const file = path.join(loadConfig().runDir, 'selfcheck.json');
+  let rec: Record<string, { key: string; at: string; broken: string[] }> = {};
+  try { rec = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first check */ }
+  const prev = rec[profile];
+  if (prev?.key === key && !prev.broken.length) return null;
+  const sc = await runSelfcheck(b).catch((e) => ({ ok: [] as string[], broken: [`self-check failed: ${e?.message ?? e}`] }));
+  rec[profile] = { key, at: new Date().toISOString(), broken: sc.broken };
+  try { fs.writeFileSync(file, JSON.stringify(rec, null, 1)); } catch { /* run dir not writable: check again next launch */ }
+  if (sc.broken.length) return `SELF-CHECK on ${key}: ${sc.broken.length} feature(s) broken (tools that use them fail or return less): ${sc.broken.join('; ')}`;
+  return prev && prev.key !== key ? `self-check after the update (${prev.key} -> ${key}): all ${sc.ok.length} internals OK` : null;
 }
 
 export const selfcheckTools = [

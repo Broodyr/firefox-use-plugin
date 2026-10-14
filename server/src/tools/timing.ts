@@ -12,6 +12,7 @@ import { fail } from '../errors.js';
 import { stateDir } from '../audit/audit.js';
 import { FIRST_STATEMENT, debuggerFor, type PauseHook } from '../browser/debugger.js';
 import { startLoadTrace, stopLoadTrace, type LoadTrace } from '../browser/loadtrace.js';
+import { NAV } from '../browser/internals.js';
 import type { Browser } from '../browser/session.js';
 import { sleep } from '../browser/launcher.js';
 import { readState } from '../adapters/violentmonkey.js';
@@ -47,9 +48,7 @@ interface Row { t: number; cat: string; text: string; approx?: boolean }
 
 async function tabPid(b: Browser, context: string): Promise<number | undefined> {
   return b.callChrome<number | null>(`({ id }) => {
-    let Nav;
-    try { Nav = ChromeUtils.importESModule("chrome://remote/content/shared/NavigableManager.sys.mjs").NavigableManager; } catch {}
-    if (!Nav?.getBrowsingContextById) Nav = ChromeUtils.importESModule("chrome://remote/content/shared/TabManager.sys.mjs").TabManager;
+    ${NAV}
     return Nav.getBrowsingContextById(id)?.currentWindowGlobal?.osPid ?? null;
   }`, { id: context }).then((x) => x ?? undefined).catch(() => undefined);
 }

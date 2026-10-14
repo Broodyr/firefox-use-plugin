@@ -26,7 +26,7 @@ async function pageInfo(b: Browser, context: string) {
 }
 
 // ------------------------------------------------------------ accessibility snapshots
-interface Snap { header: string; lines: Map<string, string>; order: string[]; rendered: string[]; nodes: RawNode[]; refs: string[] }
+interface Snap { header: string; /** '' or a line (starting with a newline) after the header line */ warning: string; lines: Map<string, string>; order: string[]; rendered: string[]; nodes: RawNode[]; refs: string[] }
 
 async function takeSnapshot(b: Browser, context: string, filter: 'interactive' | 'all', root: string | undefined, detail: Detail): Promise<Snap> {
   const walk = await b.a11yWalk(context, 20000);
@@ -69,7 +69,10 @@ async function takeSnapshot(b: Browser, context: string, filter: 'interactive' |
     stack.push({ depth: n.depth, name: n.name });
   }
   const header = `${walk.title} — ${walk.url}\n${order.length} of ${nodes.length} nodes (${filter}${root ? `, root ${root}` : ''})${walk.truncated ? ' [tree truncated]' : ''} · viewport ${walk.vw}x${walk.vh}`;
-  return { header, lines, order, rendered, nodes, refs };
+  // one field failing on every node: the accessibility API changed (a Firefox update), not this page
+  const broken = Object.entries((walk.fails ?? {}) as Record<string, number>).filter(([, n]) => nodes.length >= 5 && n === nodes.length).map(([k]) => k);
+  const warning = broken.length ? `\nWARNING: Firefox's accessibility API failed on every node for ${broken.join(', ')}, so roles, names or positions may be blank. A Firefox update may have changed it: run ff_selfcheck.` : '';
+  return { header, warning, lines, order, rendered, nodes, refs };
 }
 
 // ------------------------------------------------------------ screenshots
@@ -198,11 +201,11 @@ export const pageTools = [
       const id = b.refs.saveSnapshot(context, s.lines, s.order);
       if (a.since) {
         const prev = b.refs.getSnapshot(a.since);
-        if (!prev || prev.context !== context) return `${s.header} · ${id}\n(${a.since} is unknown or expired after navigation; full snapshot follows)\n${s.rendered.join('\n')}`;
+        if (!prev || prev.context !== context) return `${s.header} · ${id}${s.warning}\n(${a.since} is unknown or expired after navigation; full snapshot follows)\n${s.rendered.join('\n')}`;
         const d = diffSnapshots(prev, { id, context, lines: s.lines, order: s.order });
-        return `${s.header} · ${id} · diff vs ${a.since}: ${d.length} change(s)\n${d.join('\n') || '(no changes)'}`;
+        return `${s.header} · ${id} · diff vs ${a.since}: ${d.length} change(s)${s.warning}\n${d.join('\n') || '(no changes)'}`;
       }
-      return `${s.header} · ${id}\n${s.rendered.join('\n')}`;
+      return `${s.header} · ${id}${s.warning}\n${s.rendered.join('\n')}`;
     },
   }),
   tool({

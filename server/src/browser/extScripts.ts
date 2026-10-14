@@ -1,9 +1,20 @@
 // Privileged functions for the extension tools (run in the chrome window over BiDi, one JSON arg).
 
+/** Firefox's own manifest validation (what a temporary install would say), without installing. */
+export const MANIFEST_VALIDATE = `async ({ path }) => {
+  const { ExtensionData } = ChromeUtils.importESModule("resource://gre/modules/Extension.sys.mjs");
+  const { FileUtils } = ChromeUtils.importESModule("resource://gre/modules/FileUtils.sys.mjs");
+  const data = new ExtensionData(Services.io.newFileURI(new FileUtils.File(path)));
+  let manifest = null, thrown = null;
+  try { manifest = await data.loadManifest(); } catch (e) { thrown = String(e && e.message || e); }
+  const m = manifest || data.manifest || {};
+  return { thrown, errors: (data.errors || []).map(String), warnings: (data.warnings || []).map(String), id: data.id || null, name: m.name || null, version: m.version || null, mv: m.manifest_version || null };
+}`;
+
 const AM = `const { AddonManager } = ChromeUtils.importESModule("resource://gre/modules/AddonManager.sys.mjs");`;
 
 /** Resolve an add-on (by id) to its live policy/extension; throws if not installed. */
-const EXT = `
+export const EXT = `
   const pol = WebExtensionPolicy.getByID(id);
   const ext = pol && pol.extension;
   if (!ext) throw new Error("extension " + id + " is not running (disabled or not installed); addons_set_enabled it first");
@@ -76,7 +87,7 @@ export const EXT_WAKE = `async ({ id }) => {
 }`;
 
 /** Storage areas, read and written from the parent through Firefox's own storage backends. */
-const STORAGE = `
+export const STORAGE = `
   const { ExtensionStorageIDB } = ChromeUtils.importESModule("resource://gre/modules/ExtensionStorageIDB.sys.mjs");
   const { ExtensionStorage, extensionStorageSession } = ChromeUtils.importESModule("resource://gre/modules/ExtensionStorage.sys.mjs");
   const plain = (o) => {

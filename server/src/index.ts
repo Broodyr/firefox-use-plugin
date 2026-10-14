@@ -38,7 +38,7 @@ import { regressTools } from './tools/regress.js';
 import { bisectTools } from './tools/bisect.js';
 import { pinsAtLaunch, pinsTools } from './tools/pins.js';
 import { runAllTests } from './tools/regress.js';
-import { runSelfcheck, selfcheckTools } from './tools/selfcheck.js';
+import { selfcheckAtLaunch, selfcheckTools } from './tools/selfcheck.js';
 import { siteStorageTools } from './tools/sitestorage.js';
 import { stylusTools } from './tools/stylus.js';
 import { dialogTools } from './tools/dialogs.js';
@@ -95,11 +95,9 @@ async function getBrowser(): Promise<Browser> {
       if (b.launchedNow && !b.state.throwaway && !b.personal) {
         const note = await pinsAtLaunch(b, runAllTests).catch((e) => `pins check failed: ${e?.message ?? e}`);
         if (note) b.launchNotes.push(note);
-        // a new Firefox: check the internals the plugin relies on now, not mid-task
-        if (note && /Firefox [\d.]+ -> /.test(note)) {
-          const sc = await runSelfcheck(b).catch((e) => ({ ok: [], broken: [`self-check failed: ${e?.message ?? e}`] }));
-          b.launchNotes.push(sc.broken.length ? `SELF-CHECK after the Firefox update: ${sc.broken.length} feature(s) broken: ${sc.broken.join('; ')}` : `self-check after the Firefox update: all ${sc.ok.length} internals OK`);
-        }
+        // a new Firefox build: check the internals the plugin relies on now, not mid-task
+        const sc = await selfcheckAtLaunch(b, profileKey(opts)).catch((e) => `self-check failed: ${e?.message ?? e}`);
+        if (sc) b.launchNotes.push(sc);
       }
       // config liveView.autoOpen: a live view for this session at every launch
       const testViewer = !!process.env.FIREFOX_USE_TEST_LIVE_VIEWER;

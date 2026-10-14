@@ -39,8 +39,29 @@ export function addonFile(id) {
   return null;
 }
 
-/** The Firefox the server would use (config.json, else the install the registry or Program Files names). */
+/**
+ * FIREFOX_USE_TEST_FIREFOX: the tests run on this Firefox instead (firefox.exe or its folder; CI's Beta job), else
+ * null. Test homes write it into their config.json.
+ */
+export function testFirefox() {
+  const p = process.env.FIREFOX_USE_TEST_FIREFOX;
+  if (!p) return null;
+  const exe = fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, 'firefox.exe') : p;
+  return fs.existsSync(exe) ? exe : null;
+}
+
+/** Firefox's version (and build id) from the application.ini next to its executable, e.g. "159.0 (20261101093012)". */
+export function firefoxVersion(exe) {
+  try {
+    const ini = fs.readFileSync(path.join(path.dirname(exe), 'application.ini'), 'utf8');
+    const v = /^Version=(.+)$/m.exec(ini)?.[1]?.trim(), b = /^BuildID=(.+)$/m.exec(ini)?.[1]?.trim();
+    return v ? `${v}${b ? ` (${b})` : ''}` : null;
+  } catch { return null; }
+}
+
+/** The Firefox the server would use (the test override, config.json, else the install the registry or Program Files names). */
 export function firefoxPath() {
+  if (process.env.FIREFOX_USE_TEST_FIREFOX) return testFirefox();
   const configured = realConfig().firefoxPath;
   if (configured && fs.existsSync(configured)) return configured;
   if (process.platform !== 'win32') return null;
@@ -85,7 +106,8 @@ export function preflight({ serverRoot = ROOT, addons = true, claudeDev = false,
   if (!fs.existsSync(path.join(serverRoot, 'server', 'dist', 'index.js'))) {
     problems.push(serverRoot === ROOT ? 'The server isn\'t built: run npm install, then npm run build.' : `No server in ${serverRoot}: run npm run release first.`);
   }
-  if (!firefoxPath()) problems.push('Firefox isn\'t installed (or not where Windows registers it): install the current release.');
+  if (process.env.FIREFOX_USE_TEST_FIREFOX && !testFirefox()) problems.push(`FIREFOX_USE_TEST_FIREFOX is set, but there is no firefox.exe at ${process.env.FIREFOX_USE_TEST_FIREFOX}.`);
+  else if (!firefoxPath()) problems.push('Firefox isn\'t installed (or not where Windows registers it): install the current release.');
   if (addons && !coreAddons()) {
     problems.push('The test profiles need uBlock Origin and Violentmonkey. Run npm run test:setup (copies or downloads the pinned versions\n    into dev/harness/.test-addons/), or setup\\setup.ps1, which copies yours from your own Firefox.');
   }

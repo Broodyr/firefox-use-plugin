@@ -6,6 +6,7 @@
 // layout/style flushes ("PresShell::DoFlushPendingNotifications …", "Styles", "Reflow <url>", "Layout <url>"),
 // below the script frame that forced them. Idle samples (category Idle) separate tasks: a task = a run of busy
 // samples, long = 50 ms or more. Everything here is sampled: times are estimates at the sampling interval.
+import { NAV } from './internals.js';
 
 /** function (profile, {pid?, from, to, interval, includeBrowser, top}) -> summary (runs in the chrome realm) */
 const ANALYZE = `function __cfAnalyze(profile, o) {
@@ -129,9 +130,7 @@ export const PERF_STOP = `async ({ analyze, save }) => {
 
 /** Content process pid and top outer window id of a tab (memory reporters name windows "top(<url>, id=<outer id>)"). */
 export const TAB_WINDOW = `({ id }) => {
-  let Nav;
-  try { Nav = ChromeUtils.importESModule("chrome://remote/content/shared/NavigableManager.sys.mjs").NavigableManager; } catch {}
-  if (!Nav?.getBrowsingContextById) Nav = ChromeUtils.importESModule("chrome://remote/content/shared/TabManager.sys.mjs").TabManager;
+  ${NAV}
   const wg = Nav.getBrowsingContextById(id)?.currentWindowGlobal;
   return wg ? { pid: wg.osPid, outer: wg.outerWindowId, url: wg.documentURI ? wg.documentURI.spec : "" } : null;
 }`;

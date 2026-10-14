@@ -4,7 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { McpClient, ROOT } from '../client.ts';
-import { CORE_FILES, claudeDevProfile, coreAddons, firefoxPath, realConfig } from '../env.mjs';
+import { CORE_FILES, claudeDevProfile, coreAddons, firefoxPath, realConfig, testFirefox } from '../env.mjs';
 
 export { McpClient, ROOT };
 
@@ -84,6 +84,9 @@ export function makeHome(overrides: (cfg: any, home: string) => void = () => {},
   // the real config (Firefox path, profiles, ...), or {} before setup has run
   const cfg: any = realConfig();
   cfg.runDir = path.join(home, 'run');
+  // CI's Beta job (and anyone trying another Firefox): FIREFOX_USE_TEST_FIREFOX
+  const ff = testFirefox();
+  if (ff) cfg.firefoxPath = ff;
   cfg.sandboxDir = path.join(home, 'sandbox');
   // private copy of the core add-ons: launch-time sync may rewrite them
   const addons = path.join(home, 'addons');

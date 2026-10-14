@@ -1,12 +1,10 @@
 // Functions evaluated in the privileged (chrome) context of a browser.xhtml window over BiDi
 // (moz:scope "chrome"). Each is sent as source and called with one JSON argument.
+import { NAV } from './internals.js';
 
-/** Shared prelude: map BiDi top-level context ids <-> <tab> elements via the remote agent's TabManager. */
+/** Shared prelude: map BiDi top-level context ids <-> <tab> elements via the remote agent's NavigableManager. */
 const TABS = `
-  let Nav;
-  try { Nav = ChromeUtils.importESModule("chrome://remote/content/shared/NavigableManager.sys.mjs").NavigableManager; } catch {}
-  if (!Nav?.getIdForBrowser) Nav = ChromeUtils.importESModule("chrome://remote/content/shared/TabManager.sys.mjs").TabManager;
-  if (!Nav?.getIdForBrowser) throw new Error("remote agent internals changed: no getIdForBrowser in NavigableManager/TabManager");
+  ${NAV}
   const idOf = (tab) => Nav.getIdForBrowser(tab.linkedBrowser);
   const tabOf = (id) => {
     const bc = Nav.getBrowsingContextById(id);
@@ -301,15 +299,18 @@ export const A11Y_WALK = `async ({ id, maxNodes }) => {
   const ox = win.mozInnerScreenX + rect.left, oy = win.mozInnerScreenY + rect.top;
   const x = {}, y = {}, w = {}, h = {};
   const nodes = [];
+  // per-node failures are normal (a node going away mid-walk); a field failing on EVERY node means the
+  // accessibility API changed, which read_page reports instead of showing blank roles or zero boxes
+  const fails = { aria: 0, bounds: 0, name: 0 };
   const attr = (a, k) => { try { return a.attributes.getStringProperty(k); } catch { return ''; } };
   const walk = (a, depth, frameUrl) => {
     if (!a || nodes.length >= maxNodes) return;
     const role = svc.getStringRole(a.role);
-    let aria = ''; try { aria = a.computedARIARole || ''; } catch {}
+    let aria = ''; try { const r = a.computedARIARole; if (typeof r !== 'string') fails.aria++; aria = r || ''; } catch { fails.aria++; }
     let bx = [0, 0, 0, 0];
-    try { a.getBoundsInCSSPixels(x, y, w, h); bx = [x.value - ox, y.value - oy, w.value, h.value].map(Math.round); } catch {}
+    try { a.getBoundsInCSSPixels(x, y, w, h); bx = [x.value - ox, y.value - oy, w.value, h.value].map(Math.round); } catch { fails.bounds++; }
     const st = {}, ex = {}; a.getState(st, ex);
-    let name = ''; try { name = a.name || ''; } catch {}
+    let name = ''; try { name = a.name || ''; } catch { fails.name++; }
     let value = ''; try { value = a.value || ''; } catch {}
     let fu = frameUrl;
     if (role === 'document' && depth > 0) { try { fu = a.QueryInterface(Ci.nsIAccessibleDocument).URL; } catch {} }
@@ -317,7 +318,7 @@ export const A11Y_WALK = `async ({ id, maxNodes }) => {
     for (let c = a.firstChild; c; c = c.nextSibling) walk(c, depth + 1, fu);
   };
   walk(doc, 0, '');
-  return { url: br.currentURI.spec, title: t.label, vw: Math.round(rect.width), vh: Math.round(rect.height), truncated: nodes.length >= maxNodes, nodes };
+  return { url: br.currentURI.spec, title: t.label, vw: Math.round(rect.width), vh: Math.round(rect.height), truncated: nodes.length >= maxNodes, nodes, fails };
 }`;
 
 /** Reload bypassing the cache (BiDi reload's ignoreCache is not implemented in Firefox yet). */

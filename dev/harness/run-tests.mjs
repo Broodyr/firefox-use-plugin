@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROOT, preflight } from './env.mjs';
+import { ROOT, firefoxPath, firefoxVersion, preflight } from './env.mjs';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'tests');
 const SLOW = new Set(['bisect', 'acceptance-full', 'drift', 'login', 'memory', 'pins', 'regress', 'snapshots', 'ubo', 'debugger', 'window', 'stuck']);
@@ -29,5 +29,7 @@ const files = fs.readdirSync(dir).filter((f) => f.endsWith('.test.ts')).map((f) 
   .map((f) => path.join('dev', 'harness', 'tests', `${f}.test.ts`));
 if (!files.length) { console.error(`no test files match ${set} ${names.join(' ')}`); process.exit(1); }
 console.log(`${set}: ${files.length} file(s), concurrency ${conc}${serverRoot ? `, server from ${serverRoot}/` : ''}`);
+const ff = firefoxPath();
+console.log(`Firefox ${firefoxVersion(ff) ?? '(version unknown)'} at ${ff}${process.env.FIREFOX_USE_TEST_FIREFOX ? ' (FIREFOX_USE_TEST_FIREFOX)' : ''}`);
 const r = spawnSync(process.execPath, ['--test', `--test-concurrency=${conc}`, '--test-timeout=120000', ...files], { stdio: 'inherit' });
 process.exit(r.status ?? 1);

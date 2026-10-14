@@ -4,6 +4,7 @@ import { ToolError, fail } from '../errors.js';
 import { evalPrivileged } from '../transports/privileged.js';
 import { ALIASES } from './scope.js';
 import * as XS from './extScripts.js';
+import { NAV } from './internals.js';
 import { SERIALIZER, bidiEvalFunction, hasReturn, rdpEvalSource } from './serialize.js';
 import type { Browser } from './session.js';
 import type { TargetInfo } from './devtools.js';
@@ -49,9 +50,7 @@ export async function frameContext(b: Browser, top: string, frame?: number | str
 /** BiDi context id -> its browsing context id and current inner window id (to match devtools targets). */
 export async function contextIds(b: Browser, context: string): Promise<{ bc: number; innerWindowId: number }> {
   return b.callChrome(`({ id }) => {
-    let Nav;
-    try { Nav = ChromeUtils.importESModule("chrome://remote/content/shared/NavigableManager.sys.mjs").NavigableManager; } catch {}
-    if (!Nav?.getBrowsingContextById) Nav = ChromeUtils.importESModule("chrome://remote/content/shared/TabManager.sys.mjs").TabManager;
+    ${NAV}
     const bc = Nav.getBrowsingContextById(id);
     if (!bc) throw new Error("browsing context not found");
     return { bc: bc.id, innerWindowId: bc.currentWindowGlobal ? bc.currentWindowGlobal.innerWindowId : 0 };
