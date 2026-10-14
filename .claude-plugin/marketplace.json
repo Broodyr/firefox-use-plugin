@@ -5,7 +5,7 @@
   "plugins": [
     {
       "name": "firefox-use",
-      "source": { "source": "github", "repo": "Broodyr/firefox-use-plugin", "ref": "release" },
+      "source": { "source": "url", "url": "https://github.com/Broodyr/firefox-use-plugin.git", "ref": "release" },
       "description": "Deep control of a dedicated Firefox profile: browsing, privileged access, extension internals, Violentmonkey, Stylus and uBlock Origin workflows, a real debugger",
       "category": "development"
     }
