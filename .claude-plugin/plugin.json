@@ -1,0 +1,31 @@
+{
+  "name": "firefox-use",
+  "version": "1.0.0",
+  "description": "Deep control of a dedicated Firefox profile: browsing, privileged access, extension internals, Violentmonkey, Stylus and uBlock Origin workflows, a real debugger.",
+  "author": {
+    "name": "Broodyr"
+  },
+  "homepage": "https://github.com/Broodyr/firefox-use-plugin",
+  "repository": "https://github.com/Broodyr/firefox-use-plugin",
+  "license": "MIT",
+  "keywords": [
+    "firefox",
+    "browser",
+    "userscripts",
+    "violentmonkey",
+    "stylus",
+    "userstyles",
+    "ublock-origin",
+    "extensions",
+    "debugger",
+    "webdriver-bidi"
+  ],
+  "mcpServers": {
+    "firefox": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/server/proxy/proxy.mjs"
+      ]
+    }
+  }
+}

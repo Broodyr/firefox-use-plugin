@@ -1,0 +1,13 @@
+{
+  "description": "firefox-use: calls that run other tools (batch, test_record, test_run, bisect) or privileged code (eval, wait_for, verify in the privileged realm) get the permission checks of what they run",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__plugin_firefox-use_firefox__(batch|ff_dev_call|test_record|test_run|bisect|eval|wait_for|verify)$",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/server/hooks/permissions.mjs"], "timeout": 15 }
+        ]
+      }
+    ]
+  }
+}
