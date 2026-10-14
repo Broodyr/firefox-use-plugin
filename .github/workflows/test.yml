@@ -1,6 +1,8 @@
 # The core integration suite on a clean Windows runner, against the source build and the release bundle.
 # No claude-dev here: the tests run on throwaway copies of a template profile, with the add-ons pinned in
 # dev/harness/test-addons.json (npm run test:setup downloads them from addons.mozilla.org and checks their hashes).
+# Firefox is the current release, downloaded from Mozilla at the start of each run: the runner image's own copy is
+# whatever was current when GitHub built the image (156.0.1 in a 2026-09-25 image, two releases behind).
 name: tests
 
 on:
@@ -19,20 +21,20 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Firefox
-        # windows-latest ships Firefox; install it if an image ever doesn't
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$env:ProgramFiles\Mozilla Firefox\firefox.exe")) { choco install firefox -y --no-progress }
-          (Get-Item "$env:ProgramFiles\Mozilla Firefox\firefox.exe").VersionInfo.ProductVersion
+      - uses: browser-actions/setup-firefox@v1
+        id: firefox
+        with:
+          firefox-version: latest
       - run: npm ci
       - run: npm run build
       - run: npm run test:setup
-      - name: Core suite (source build)
+      - name: Core suite on Firefox ${{ steps.firefox.outputs.firefox-version }} (source build)
         env:
+          FIREFOX_USE_TEST_FIREFOX: ${{ steps.firefox.outputs.firefox-path }}
           CF_TEST_CONCURRENCY: 2 # 4 vCPUs: four Firefoxes at once starve each other (timeouts, profiler gaps)
         run: npm run test:core
-      - name: Core suite (release bundle)
+      - name: Core suite on Firefox ${{ steps.firefox.outputs.firefox-version }} (release bundle)
         env:
-          CF_TEST_CONCURRENCY: 2 # 4 vCPUs: four Firefoxes at once starve each other (timeouts, profiler gaps)
+          FIREFOX_USE_TEST_FIREFOX: ${{ steps.firefox.outputs.firefox-path }}
+          CF_TEST_CONCURRENCY: 2
         run: npm run test:release
