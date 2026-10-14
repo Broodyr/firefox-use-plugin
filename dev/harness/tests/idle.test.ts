@@ -15,7 +15,8 @@ describe('idle quit', () => {
     await c.call('tabs_create', { url: fx.url('/text.html') });
     await c.call('scope_set', { description: 'prefs for the idle test', areas: ['prefs'], user_said: 'ok' });
     const pid = Number(/pid (\d+)/.exec((await c.call('ff_status', {})).text)![1]);
-    for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 250));
+    // (a quit can take over 10 s on a loaded CI runner; the server waits 15 s before killing)
+    for (let i = 0; i < 120 && alive(pid); i++) await new Promise((r) => setTimeout(r, 250));
     assert.ok(!alive(pid), 'Firefox closed after 3 s idle');
     assert.match(c.stderr.join('\n'), /no tool calls for \d+ min: closing Firefox/);
     const r = await c.call('ff_launch', {});

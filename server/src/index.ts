@@ -531,7 +531,9 @@ let lastActivity = Date.now();
 const idleMinutes = Number(process.env.FIREFOX_USE_IDLE_QUIT_MIN ?? loadConfig().idleQuitMinutes ?? 0);
 if (idleMinutes > 0) {
   setInterval(async () => {
-    if (inflight > 0 || opening || Date.now() - lastActivity < idleMinutes * 60000) return;
+    // (not while an idle quit is still closing Firefox: its run state still says "alive", and re-attaching to the
+    // closing Firefox below lost the connection mid-call when a quit took longer than a tick, on a slow machine)
+    if (inflight > 0 || opening || quitting || Date.now() - lastActivity < idleMinutes * 60000) return;
     if (!browser || browser.dead) {
       // a Firefox this session owns but no backend is attached to (e.g. left running across a hot reload)
       const st = readRunState(profileKey(opts));
