@@ -66,9 +66,13 @@ const TOOLS: ToolDef[] = [...lifecycleTools, ...tabTools, ...pageTools, ...input
 // ------------------------------------------------------------ browser ownership
 let browser: Browser | null = null;
 let opening: Promise<Browser> | null = null;
+/** an idle quit still closing Firefox: the next launch waits for it (attaching to the closing one lost the connection mid-call) */
+let quitting: Promise<unknown> | null = null;
 /** approvals and a note carried over an idle quit, adopted by the next launch */
 let afterIdle: { approvals: ReturnType<Browser['approvals']>; urls: string[]; current: number; note: string } | null = null;
 async function getBrowser(): Promise<Browser> {
+  if (browser && !browser.dead) return browser;
+  if (quitting) await quitting;
   if (browser && !browser.dead) return browser;
   if (!opening) {
     // a login handoff (ff_handoff mode "login"): the profile is open as an ordinary Firefox until the user closes it
@@ -544,7 +548,7 @@ if (idleMinutes > 0) {
       note: `Firefox had been closed after ${idleMinutes} min without tool calls (idle quit); relaunched with ${agent.length} agent tab(s) reopened (page state such as form contents was not kept)`,
     };
     browser = null;
-    void b.quit().catch(() => b.kill());
+    quitting = b.quit().catch(() => b.kill()).catch(() => {}).finally(() => { quitting = null; });
   }, Math.min(30000, idleMinutes * 60000)).unref();
 }
 

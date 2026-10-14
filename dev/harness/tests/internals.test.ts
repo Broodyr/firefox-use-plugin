@@ -22,7 +22,11 @@ describe('Firefox internals', () => {
     for (const f of sources(path.join(ROOT, 'server', 'src'))) {
       const text = fs.readFileSync(f, 'utf8');
       const rel = path.relative(ROOT, f);
-      for (const m of text.matchAll(/importESModule\(\s*["']([^"']+)["']/g)) if (!modules.has(m[1])) modules.set(m[1], rel);
+      // module URLs anywhere (also in a list of URLs to try: Mozilla is moving modules from resource:// to moz-src:///)
+      for (const m of text.matchAll(/importESModule\(\s*["']([^"']+)["']|["']((?:resource:\/\/gre\/modules|moz-src:\/\/|chrome:\/\/remote\/content)\/[^"']+\.sys\.mjs)["']/g)) {
+        const url = m[1] ?? m[2];
+        if (!modules.has(url)) modules.set(url, rel);
+      }
       for (const m of text.matchAll(/gBrowser\??\.([A-Za-z_$][\w$]*)/g)) if (!members.has(m[1])) members.set(m[1], rel);
     }
     assert.ok(modules.size >= 10 && members.size >= 5, `scan found ${modules.size} modules, ${members.size} gBrowser members`);
@@ -38,9 +42,9 @@ describe('Firefox internals', () => {
     before(async () => { h = makeHome(); c = await startServer(h.env); });
     after(async () => { await c.close(); h.cleanup(); });
 
-    // TEMPORARY (2026-10-13): which global jsdebugger.sys.mjs loads into on this Firefox (159 Beta refused the shared one)
-    it('diagnostic: jsdebugger.sys.mjs load variants', async () => {
-      const r = await c.call('eval_privileged', { code: `const out = {}; for (const g of ["shared", "devtools", "current"]) { try { const m = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs", g === "shared" ? undefined : { global: g }); out[g] = typeof m.addDebuggerToGlobal; } catch (e) { out[g] = "ERR " + (e && e.message || e); } } return out;` });
+    // TEMPORARY (2026-10-13): which URL jsdebugger.sys.mjs loads from on this Firefox (159 moved it to moz-src)
+    it('diagnostic: jsdebugger.sys.mjs URLs', async () => {
+      const r = await c.call('eval_privileged', { code: `const out = {}; for (const u of ["moz-src:///devtools/platform/jsdebugger.sys.mjs", "resource://gre/modules/jsdebugger.sys.mjs"]) { try { out[u] = typeof ChromeUtils.importESModule(u).addDebuggerToGlobal; } catch (e) { out[u] = "ERR " + (e && e.message || e); } } return out;` });
       console.log(`[diagnostic] jsdebugger.sys.mjs on this Firefox: ${r.text.replace(/\s+/g, ' ').slice(0, 600)}`);
     });
 

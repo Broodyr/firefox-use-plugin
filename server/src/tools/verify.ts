@@ -121,9 +121,14 @@ export const verifyTools = [
       const ctxId = await b.context(a.tab);
       const tabHandle = Number(Object.entries(b.state.tabs ?? {}).find(([, v]) => v === ctxId)?.[0]);
       const tabBc = [...b.bcTab.entries()].find(([, h]) => h === tabHandle)?.[0];
-      const fresh = d.log.filter((e) => e.seq > c0);
-      const mine = fresh.filter((e) => e.bc === undefined || tabBc === undefined || e.bc === tabBc || e.source === 'extension' || e.source === 'browser');
-      const errors = mine.filter((e) => e.level === 'error' && !(e.source === 'browser' && (/AboutNewTab|FaviconLoader/.test(e.text) || /^(chrome:\/\/remote\/|resource:\/\/gre\/modules\/EventEmitter)/.test(e.url ?? ''))));
+      const collect = () => {
+        const mine = d.log.filter((e) => e.seq > c0).filter((e) => e.bc === undefined || tabBc === undefined || e.bc === tabBc || e.source === 'extension' || e.source === 'browser');
+        return { mine, errors: mine.filter((e) => e.level === 'error' && !(e.source === 'browser' && (/AboutNewTab|FaviconLoader/.test(e.text) || /^(chrome:\/\/remote\/|resource:\/\/gre\/modules\/EventEmitter)/.test(e.url ?? '')))) };
+      };
+      // a failed check usually has an error behind it, and console capture is asynchronous (seconds on a loaded
+      // machine): give it up to 1.5 s before reporting "0 new errors"
+      for (const te = Date.now(); failed && !collect().errors.length && Date.now() - te < 1500;) await new Promise((r) => setTimeout(r, 100));
+      const { mine, errors } = collect();
       const lines: string[] = [];
       const url = navText.split('\n')[0];
       lines.push(`verify ${url} — ${results.length ? `${passed}/${results.length} check(s) passed` : 'no checks'} · loaded in ${loadMs} ms · ${errors.length} new error(s)`);

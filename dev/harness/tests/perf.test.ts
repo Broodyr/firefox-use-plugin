@@ -11,7 +11,7 @@ const PAGE = `<!doctype html><title>perf</title>
   <script src="/lib.js"></script>
   <script>
     function busyInline(ms) { const t = performance.now(); while (performance.now() - t < ms) {} }
-    new MutationObserver(function onMutations() { busyInline(8); }).observe(document.documentElement, { childList: true, subtree: true });
+    new MutationObserver(function onMutations() { busyInline(25); }).observe(document.documentElement, { childList: true, subtree: true });
     function addNodes() { for (let i = 0; i < 200; i++) { const d = document.createElement('div'); d.textContent = i; document.documentElement.append(d); void document.documentElement.offsetHeight; } }
     addNodes();
     setTimeout(function longTask() { busyInline(90); }, 10);
@@ -68,6 +68,11 @@ describe('performance', () => {
     const file = /saved (\S+\.json\.gz)/.exec(r.text)![1];
     const prof = JSON.parse(zlib.gunzipSync(fs.readFileSync(file)).toString('utf8'));
     assert.ok(prof.meta && Array.isArray(prof.processes), 'a Gecko profile');
+    // TEMPORARY (2026-10-13): the label frames of layout/style flushes on this Firefox (159 Beta: none recognized)
+    const labels = new Set<string>();
+    const walk = (o: any) => { if (!o || typeof o !== 'object') return; for (const [k, v] of Object.entries(o)) { if ((k === 'stringTable' || k === 'stringArray') && Array.isArray(v)) { for (const s of v) if (typeof s === 'string' && /flush|reflow|layout|style/i.test(s) && s.length < 120) labels.add(s); } else walk(v); } };
+    walk(prof);
+    console.log(`[diagnostic] flush-like labels (${labels.size}): ${[...labels].slice(0, 40).join(' | ')}`);
     r = await c.call('perf_profile', { action: 'stop' });
     assert.match(r.text, /NOT_RUNNING/);
   });

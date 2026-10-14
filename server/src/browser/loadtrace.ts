@@ -12,19 +12,19 @@ import type { Devtools, TargetInfo } from './devtools.js';
 export type ExecRecord = [number, string | null, number, string | null, string, string];
 
 /**
- * Prelude: `addDebuggerToGlobal` from jsdebugger.sys.mjs, loaded into the shared system global, else the DevTools
- * global, else the calling one; every error is reported when none works (Firefox 159 Beta's parent process refused
- * the shared global: "Failed to load"; its content processes did not). Also used by debugger.ts.
+ * Prelude: `addDebuggerToGlobal` from jsdebugger.sys.mjs, which Firefox 159 moved from resource://gre/modules/ to
+ * moz-src:///devtools/platform/ (Mozilla is moving modules to moz-src URLs); every error is reported when neither
+ * loads. Also used by debugger.ts.
  */
 export const ADD_DEBUGGER = `
   const addDebuggerToGlobal = (() => {
     const errs = [];
-    for (const o of [undefined, { global: "devtools" }, { global: "current" }]) {
+    for (const url of ["moz-src:///devtools/platform/jsdebugger.sys.mjs", "resource://gre/modules/jsdebugger.sys.mjs"]) {
       try {
-        const m = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs", o);
+        const m = ChromeUtils.importESModule(url);
         if (typeof m.addDebuggerToGlobal === "function") return m.addDebuggerToGlobal;
-        errs.push((o ? o.global : "shared") + ": no addDebuggerToGlobal");
-      } catch (e) { errs.push((o ? o.global : "shared") + ": " + (e && e.message || e)); }
+        errs.push(url + ": no addDebuggerToGlobal");
+      } catch (e) { errs.push(url + ": " + (e && e.message || e)); }
     }
     throw new Error("jsdebugger.sys.mjs could not be loaded (" + errs.join("; ") + ")");
   })();
