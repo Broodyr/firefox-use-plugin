@@ -15,6 +15,7 @@ export type ExecRecord = [number, string | null, number, string | null, string, 
  * Prelude: `addDebuggerToGlobal` from jsdebugger.sys.mjs, which Firefox 159 moved from resource://gre/modules/ to
  * moz-src:///devtools/platform/ (Mozilla is moving modules to moz-src URLs); every error is reported when neither
  * loads. Also used by debugger.ts.
+ * compat(firefox < 159): the resource://gre/modules/ URL.
  */
 export const ADD_DEBUGGER = `
   const addDebuggerToGlobal = (() => {
@@ -30,10 +31,8 @@ export const ADD_DEBUGGER = `
   })();
 `;
 
-// Debugger.Script line lookup: getOffsetMetadata (getOffsetLocation was removed in Firefox 158), else the
-// script's first line
-const LINE_OF = `(script, offset) => typeof script.getOffsetMetadata === "function" ? script.getOffsetMetadata(offset).lineNumber
-  : typeof script.getOffsetLocation === "function" ? script.getOffsetLocation(offset).lineNumber : script.startLine`;
+// Debugger.Script line lookup (getOffsetLocation, which the tracer used, was removed in Firefox 158)
+const LINE_OF = `(script, offset) => script.getOffsetMetadata(offset).lineNumber`;
 
 const INSTALL = `(() => {
   const L = globalThis.__cfLoadTrace;

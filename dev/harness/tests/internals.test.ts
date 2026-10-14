@@ -37,6 +37,30 @@ describe('Firefox internals', () => {
     assert.deepEqual(missing, [], `add a probe to server/src/browser/internals.ts for:\n${missing.join('\n')}`);
   });
 
+  it('compat(firefox < N) markers: well-formed, and none left for Firefox versions below MIN_FIREFOX', async () => {
+    const { MIN_FIREFOX } = await import(pathToFileURL(path.join(ROOT, 'server', 'dist', 'browser', 'internals.js')).href);
+    const files = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.name === 'node_modules' || e.name === 'dist' ? []
+      : e.isDirectory() ? files(path.join(dir, e.name)) : /\.(ts|mjs|js|ps1)$/.test(e.name) ? [path.join(dir, e.name)] : []);
+    const malformed: string[] = [], dead: string[] = [];
+    for (const f of ['server', 'companion', 'setup'].flatMap((d) => files(path.join(ROOT, d)))) {
+      fs.readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+        if (!line.includes('compat(') || line.includes('compat(firefox < N)')) return; // (N: the convention itself)
+        const at = `${path.relative(ROOT, f)}:${i + 1}: ${line.trim().slice(0, 140)}`;
+        const m = /compat\(firefox < (\d+)\): \S/.exec(line);
+        if (!m) malformed.push(at);
+        else if (Number(m[1]) <= MIN_FIREFOX) dead.push(at);
+      });
+    }
+    assert.deepEqual(malformed, [], 'write the marker as "compat(firefox < N): what it keeps working"');
+    assert.deepEqual(dead, [], `MIN_FIREFOX is ${MIN_FIREFOX}, so this code only served Firefox versions no longer supported: remove it`);
+  });
+
+  it('a Firefox older than MIN_FIREFOX gets a note (launch notes, ff_status)', async () => {
+    const { MIN_FIREFOX, firefoxSupportNote } = await import(pathToFileURL(path.join(ROOT, 'server', 'dist', 'browser', 'internals.js')).href);
+    assert.match(firefoxSupportNote(`${MIN_FIREFOX - 1}.0.1`), new RegExp(`^Firefox ${MIN_FIREFOX - 1}\\.0\\.1 is older than this plugin supports \\(${MIN_FIREFOX} or later\\)`));
+    for (const v of [`${MIN_FIREFOX}.0`, `${MIN_FIREFOX + 2}.0b3`, '', undefined]) assert.equal(firefoxSupportNote(v), null, String(v));
+  });
+
   describe('on this Firefox', () => {
     let c: McpClient, h: ReturnType<typeof makeHome>;
     before(async () => { h = makeHome(); c = await startServer(h.env); });

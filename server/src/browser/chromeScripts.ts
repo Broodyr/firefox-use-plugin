@@ -17,7 +17,7 @@ const TABS = `
     if (window.__claudeAgentGroup && window.__claudeAgentGroups[''] === undefined) window.__claudeAgentGroups[''] = window.__claudeAgentGroup;
     return window.__claudeAgentGroups;
   };
-  const groupById = (gid) => gid ? (window.gBrowser.getTabGroupById?.(gid) ?? window.gBrowser.tabGroups?.find((g) => g.id === gid) ?? null) : null;
+  const groupById = (gid) => gid ? window.gBrowser.getTabGroupById(gid) : null;
   const group = (key = '') => groupById(groupIds()[key]);
 `;
 
@@ -187,7 +187,7 @@ export const ADOPT_POPUP = `async ({ id }) => {
     if (!srcWin.closed && srcWin.gBrowser.tabs.length <= 1 && srcWin.gBrowser.selectedTab.linkedBrowser.currentURI.spec === "about:blank") srcWin.close();
   }
   const g = group(key);
-  if (g && tab.group !== g) { if (typeof g.addTabs === "function") g.addTabs([tab]); else window.gBrowser.moveTabToExistingGroup(tab, g); }
+  if (g && tab.group !== g) g.addTabs([tab]);
   return { key, moved: srcWin !== window, id: idOf(tab) };
 }`;
 
@@ -222,10 +222,7 @@ export const ADD_TO_GROUP = `({ id, key = '' }) => {
   ${TABS}
   const t = tabOf(id), g = group(key);
   if (!t || !g) return false;
-  if (t.group !== g) {
-    if (typeof g.addTabs === 'function') g.addTabs([t]);
-    else window.gBrowser.moveTabToExistingGroup(t, g);
-  }
+  if (t.group !== g) g.addTabs([t]);
   return true;
 }`;
 

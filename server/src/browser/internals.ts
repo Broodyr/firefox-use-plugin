@@ -8,12 +8,26 @@ import { EXT, MANIFEST_VALIDATE, STORAGE } from './extScripts.js';
 import { TRACER_PROBE } from './loadtrace.js';
 import { MSGLOG_INSTALL } from './msglog.js';
 
-/** Prelude: `Nav`, the remote agent's map between BiDi context ids and browsers (NavigableManager; TabManager before). */
+/**
+ * The oldest Firefox this code supports: the release before the current one (users update over a few weeks, and
+ * claude-dev shares the binary of the user's daily Firefox). Code that only older versions need carries a marker
+ * `compat(firefox < N): what`; internals.test.ts fails once N <= MIN_FIREFOX, listing what to remove, and CI's weekly
+ * support-window job fails when a new Firefox release means this should move up (dev/support-window.mjs). ESR isn't
+ * supported.
+ */
+export const MIN_FIREFOX = 157;
+
+/** For the launch notes and ff_status: a line when this Firefox is older than the support window, else null. */
+export function firefoxSupportNote(version: string | undefined): string | null {
+  const major = Number(String(version ?? '').split('.')[0]);
+  if (!major || major >= MIN_FIREFOX) return null;
+  return `Firefox ${version} is older than this plugin supports (${MIN_FIREFOX} or later): tools that rely on Firefox internals may fail or report less. Update Firefox (menu > Help > About Firefox).`;
+}
+
+/** Prelude: `Nav`, the remote agent's map between BiDi context ids and browsers. */
 export const NAV = `
-  let Nav;
-  try { Nav = ChromeUtils.importESModule("chrome://remote/content/shared/NavigableManager.sys.mjs").NavigableManager; } catch {}
-  if (!Nav?.getIdForBrowser) Nav = ChromeUtils.importESModule("chrome://remote/content/shared/TabManager.sys.mjs").TabManager;
-  if (!Nav?.getIdForBrowser || !Nav?.getBrowsingContextById) throw new Error("remote agent internals changed: no getIdForBrowser/getBrowsingContextById in NavigableManager or TabManager");
+  const { NavigableManager: Nav } = ChromeUtils.importESModule("chrome://remote/content/shared/NavigableManager.sys.mjs");
+  if (typeof Nav?.getIdForBrowser !== "function" || typeof Nav?.getBrowsingContextById !== "function") throw new Error("remote agent internals changed: no NavigableManager.getIdForBrowser/getBrowsingContextById");
 `;
 
 /** Prelude: `tt`, WebExtension tab ids <-> tabs (the ids uBO and tabs.* use). */
@@ -57,9 +71,9 @@ export const PROBES: Probe[] = [
     feature: 'tab groups and tab moves (gBrowser)',
     code: `() => { ${WIN}
       const g = w.gBrowser;
-      const bad = ["addTabGroup", "getTabGroupById", "moveTabToExistingGroup", "adoptTab", "removeTab", "getTabForBrowser"].filter((k) => typeof g[k] !== "function");
+      const bad = ["addTabGroup", "getTabGroupById", "adoptTab", "removeTab", "getTabForBrowser"].filter((k) => typeof g[k] !== "function");
+      if (typeof w.customElements.get("tab-group")?.prototype?.addTabs !== "function") bad.push("tab-group addTabs");
       if (typeof g.tabs?.find !== "function") bad.push("tabs");
-      if (typeof g.tabGroups?.find !== "function") bad.push("tabGroups");
       if (!g.selectedTab || g.getTabForBrowser(g.selectedTab.linkedBrowser) !== g.selectedTab) bad.push("selectedTab/getTabForBrowser");
       return !bad.length || "gBrowser changed: " + bad.join(", "); }`,
   },

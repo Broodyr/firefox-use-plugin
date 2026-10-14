@@ -16,6 +16,7 @@ import { driftSummary, readDrift } from '../adapters/vmstore.js';
 import { PERSONAL, personalProfileDir, personalPrefsOk } from '../browser/personal.js';
 import { pinsStatus } from './pins.js';
 import { live } from '../live/liveview.js';
+import { firefoxSupportNote } from '../browser/internals.js';
 
 /** this session's recent dialogs / HTTP auth challenges, and any left open */
 function dialogStatus(b: Browser): string[] {
@@ -61,6 +62,7 @@ async function describePersonal(b: Browser, detail: string): Promise<string> {
   const tabs = all.filter((t) => t.agent);
   const lines = [
     `Firefox ${v.firefox} · PERSONAL MODE: your own profile${b.state.headless ? ' · headless' : ''}`,
+    ...[firefoxSupportNote(v.firefox)].filter((x): x is string => !!x),
     `transport: BiDi ${b.dead ? 'DOWN' : 'ok'} (127.0.0.1:${b.state.bidiPort}) · no privileged access, no devtools (page-level tools only)`,
     `Claude's window: ${tabs.length} tab(s) · current tab ${b.cur ?? '-'}: ${tabs.find((t) => t.current)?.url ?? '-'} · your own tabs: ${all.length - tabs.length} (not touched unless you name one)`,
   ];
@@ -86,6 +88,7 @@ async function describe(b: Browser, detail: string): Promise<string> {
   const ubo = find('uBlock0@raymondhill.net'), vm = find('{aecec67f-0d10-4fa7-b7c7-609a2db280cf}'), comp = find('companion@firefox-use');
   const lines = [
     `Firefox ${v.firefox} · profile ${b.state.key}${b.state.throwaway ? ' (throwaway)' : ''}${b.state.headless ? ' · headless' : ''} · pid ${b.state.browserPid ?? b.state.pid}${b.state.browserPid && b.state.browserPid !== b.state.pid ? ` (launcher ${b.state.pid})` : ''}`,
+    ...[firefoxSupportNote(v.firefox)].filter((x): x is string => !!x),
     `uBlock Origin ${ubo ? ubo.version + (ubo.active ? '' : ' (disabled)') : 'not installed'} · Violentmonkey ${vm ? vm.version + (vm.active ? '' : ' (disabled)') : 'not installed'} · companion: ${comp ? comp.version : 'not installed'}`,
     `transports: BiDi ${b.dead ? 'DOWN' : 'ok'} (port ${b.state.bidiPort}) · privileged: ok (chrome scope) · devtools/RDP ${b.devtools && !b.devtools.dead ? `ok (${b.devtools.liveTargets} targets)` : `DOWN${b.devtoolsError ? `: ${b.devtoolsError}` : ''}`} (port ${b.state.rdpPort})`,
     `agent tabs: ${tabs.length} in group "${b.groupLabel}"${currentClient() ? ` (this session is routed through the session that owns this Firefox, proxy ${b.state.ownerPid})` : ''} · current tab ${b.cur ?? '-'}: ${tabs.find((t) => t.current)?.url ?? '-'}`,

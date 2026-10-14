@@ -113,9 +113,8 @@ export const PERF_STOP = `async ({ analyze, save }) => {
   let summary = null, saved = null, interval = null;
   try {
     if (save) {
-      // Firefox 157: {profile: ArrayBuffer, additionalInformation}; earlier: the ArrayBuffer itself
-      const g = await Services.profiler.getProfileDataAsGzippedArrayBuffer();
-      const buf = g && g.profile ? g.profile : g;
+      // {profile: ArrayBuffer, additionalInformation}
+      const buf = (await Services.profiler.getProfileDataAsGzippedArrayBuffer()).profile;
       await IOUtils.write(save, new Uint8Array(buf));
       saved = buf.byteLength;
     }

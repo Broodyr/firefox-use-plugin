@@ -38,3 +38,13 @@ jobs:
           FIREFOX_USE_TEST_FIREFOX: ${{ steps.firefox.outputs.firefox-path }}
           CF_TEST_CONCURRENCY: 2 # 4 vCPUs: four Firefoxes at once starve each other (timeouts, profiler gaps)
         run: npm run test:core
+
+  support-window:
+    # Supported: the current release and the one before it (MIN_FIREFOX). When Firefox ships a release, this fails
+    # (weekly, so the failure email is the reminder) until MIN_FIREFOX moves up and the compat(firefox < N) code
+    # that internals.test.ts then lists is removed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: node dev/support-window.mjs

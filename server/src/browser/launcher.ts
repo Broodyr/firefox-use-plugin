@@ -267,6 +267,7 @@ export async function launchFirefox(opts: Options, key: string): Promise<RunStat
   const bidiPort = await freePort();
   const rdpPort = await freePort();
   const args = ['-no-remote', '-profile', dir,
+    // compat(firefox < 159): --remote-allow-system-access (159+: MOZ_REMOTE_ALLOW_SYSTEM_ACCESS, firefoxEnv)
     '--remote-debugging-port', String(bidiPort), '--remote-allow-system-access',
     '--start-debugger-server', String(rdpPort)];
   if (opts.headless) args.push('--headless');

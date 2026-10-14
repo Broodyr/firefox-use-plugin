@@ -39,6 +39,7 @@ import { bisectTools } from './tools/bisect.js';
 import { pinsAtLaunch, pinsTools } from './tools/pins.js';
 import { runAllTests } from './tools/regress.js';
 import { selfcheckAtLaunch, selfcheckTools } from './tools/selfcheck.js';
+import { firefoxSupportNote } from './browser/internals.js';
 import { siteStorageTools } from './tools/sitestorage.js';
 import { stylusTools } from './tools/stylus.js';
 import { dialogTools } from './tools/dialogs.js';
@@ -103,6 +104,9 @@ async function getBrowser(): Promise<Browser> {
         const sc = await selfcheckAtLaunch(b, profileKey(opts)).catch((e) => `self-check failed: ${e?.message ?? e}`);
         if (sc) b.launchNotes.push(sc);
       }
+      // a Firefox older than the support window (MIN_FIREFOX): say so up front, not as an obscure failure later
+      const support = firefoxSupportNote((b.versions ?? await b.versionsInfo().catch(() => null))?.firefox);
+      if (support) b.launchNotes.push(support);
       // config liveView.autoOpen: a live view for this session at every launch
       const testViewer = !!process.env.FIREFOX_USE_TEST_LIVE_VIEWER;
       if (b.launchedNow && (loadConfig().liveView?.autoOpen || testViewer) && !currentClient()) {

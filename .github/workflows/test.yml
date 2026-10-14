@@ -1,8 +1,9 @@
 # The core integration suite on a clean Windows runner, against the source build and the release bundle.
 # No claude-dev here: the tests run on throwaway copies of a template profile, with the add-ons pinned in
 # dev/harness/test-addons.json (npm run test:setup downloads them from addons.mozilla.org and checks their hashes).
-# Firefox is the current release, downloaded from Mozilla at the start of each run: the runner image's own copy is
-# whatever was current when GitHub built the image (156.0.1 in a 2026-09-25 image, two releases behind).
+# Firefox comes from Mozilla at the start of each run, both ends of the support window: the current release, and
+# MIN_FIREFOX (server/src/browser/internals.ts, the release before it). Not the runner image's own copy, which is
+# whatever was current when GitHub built the image (156.0.1 in a 2026-09-25 image).
 name: tests
 
 on:
@@ -13,18 +14,28 @@ on:
 
 jobs:
   core:
+    name: core (Firefox ${{ matrix.firefox }})
     runs-on: windows-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        firefox: [latest, minimum]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
+      - name: Which Firefox
+        id: want
+        shell: bash
+        run: |
+          if [ "${{ matrix.firefox }}" = minimum ]; then echo "version=$(node dev/support-window.mjs --min).0" >> "$GITHUB_OUTPUT"; else echo "version=latest" >> "$GITHUB_OUTPUT"; fi
       - uses: browser-actions/setup-firefox@v1
         id: firefox
         with:
-          firefox-version: latest
+          firefox-version: ${{ steps.want.outputs.version }}
       - run: npm ci
       - run: npm run build
       - run: npm run test:setup
@@ -34,6 +45,7 @@ jobs:
           CF_TEST_CONCURRENCY: 2 # 4 vCPUs: four Firefoxes at once starve each other (timeouts, profiler gaps)
         run: npm run test:core
       - name: Core suite on Firefox ${{ steps.firefox.outputs.firefox-version }} (release bundle)
+        if: matrix.firefox == 'latest' # the bundle doesn't depend on the Firefox version
         env:
           FIREFOX_USE_TEST_FIREFOX: ${{ steps.firefox.outputs.firefox-path }}
           CF_TEST_CONCURRENCY: 2
