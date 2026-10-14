@@ -7,7 +7,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { TOKEN_FILE, loadConfig, parseArgs, readToken, setupHint } from './config.js';
+import { TOKEN_FILE, loadConfig, parseArgs, readToken, setupHint, VERSION } from './config.js';
 import { Browser } from './browser/session.js';
 import { auditAppend, newAuditId } from './audit/audit.js';
 import { ToolError } from './errors.js';
@@ -56,7 +56,6 @@ import { armSessionResume, clearLogin, firefoxAlive, isAlive, loginCarry, ownerP
 import { PERSONAL, PersonalBrowser } from './browser/personal.js';
 import { live } from './live/liveview.js';
 
-const VERSION = '0.1.0';
 const opts = parseArgs(process.argv.slice(2));
 // personal mode survives backend reloads: this session drove the user's own Firefox before the reload
 { const st = readRunState(PERSONAL); if (st?.personal && st.ownerPid === ownerPid()) opts.profile = PERSONAL; }

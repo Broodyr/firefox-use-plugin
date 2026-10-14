@@ -68,9 +68,6 @@ const { name, ...rest } = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-pl
 fs.mkdirSync(path.join(OUT, '.claude-plugin'), { recursive: true });
 fs.writeFileSync(path.join(OUT, '.claude-plugin', 'plugin.json'), JSON.stringify({ name, version: pkg.version, ...rest }, null, 2) + '\n');
 
-// what the permission hook reads (as npm run build writes it for a source checkout)
-fs.writeFileSync(path.join(dist, 'tool-manifest.json'), execFileSync(process.execPath, [path.join(dist, 'index.js'), '--tool-manifest'], { encoding: 'utf8', windowsHide: true }));
-
 fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify({
   name: pkg.name,
   version: pkg.version,
@@ -81,6 +78,9 @@ fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify({
   engines: pkg.engines,
   bin: pkg.bin,
 }, null, 2) + '\n');
+
+// what the permission hook reads (as npm run build writes it for a source checkout); after package.json, which the server reads its version from
+fs.writeFileSync(path.join(dist, 'tool-manifest.json'), execFileSync(process.execPath, [path.join(dist, 'index.js'), '--tool-manifest'], { encoding: 'utf8', windowsHide: true }));
 
 // ---------------------------------------------------------------- third-party licenses
 const packages = new Map();

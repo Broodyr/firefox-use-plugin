@@ -29,6 +29,7 @@ describe('hot-reload proxy', () => {
     root = path.join(path.dirname(h.home), 'root');
     fs.cpSync(path.join(ROOT, 'server', 'dist'), path.join(root, 'server', 'dist'), { recursive: true });
     fs.cpSync(path.join(ROOT, 'setup'), path.join(root, 'setup'), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(root, 'package.json')); // the server's version
     fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(root, 'node_modules'), 'junction');
     fs.mkdirSync(path.join(root, 'server', 'src')); // a source checkout: the proxy lists its dev tools
     entry = path.join(root, 'server', 'dist', 'index.js');

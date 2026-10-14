@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { clientWorkspace } from './browser/client.js';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+// package.json's version (the release tree keeps package.json): the one number a release bumps
+export const VERSION: string = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')).version;
 
 export const HOME = process.env.FIREFOX_USE_HOME
   ?? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), '.local', 'share'), 'firefox-use');

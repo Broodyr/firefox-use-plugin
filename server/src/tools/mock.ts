@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { workspace } from '../config.js';
+import { VERSION, workspace } from '../config.js';
 import { fail } from '../errors.js';
 import { harFromHub, harSummary, interceptorFor, type MockRule } from '../browser/intercept.js';
 import { clock } from './console.js';
@@ -123,7 +123,7 @@ export const mockTools = [
       i.recording = null;
       const { abs, rel } = harPath(rec!.name);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
-      const har = { log: { version: '1.2', creator: { name: 'firefox-use', version: '0.1.0' }, browser: { name: 'Firefox', version: b.versions?.firefox ?? '' }, pages: [], entries } };
+      const har = { log: { version: '1.2', creator: { name: 'firefox-use', version: VERSION }, browser: { name: 'Firefox', version: b.versions?.firefox ?? '' }, pages: [], entries } };
       fs.writeFileSync(abs, JSON.stringify(har, null, 1));
       const lines = [`wrote ${rel}: ${harSummary(entries)} in ${((Date.now() - rec!.started) / 1000).toFixed(1)} s`];
       if (missing) lines.push(`WARNING: ${missing} response bod${missing === 1 ? 'y was' : 'ies were'} not kept by the devtools server (over 256 kB, or discarded); replay serves them empty (_bodyMissing in the file)`);
