@@ -13,6 +13,19 @@ const AREA_WORDS: Record<string, string> = {
 };
 const areaWords = (a: string) => AREA_WORDS[a] ?? (a.startsWith('ext:') ? `extension ${Object.entries(ALIASES).find(([, v]) => v === a.slice(4))?.[0] ?? a.slice(4)} (its storage, settings, scripts)` : a);
 
+/** Answers faster than this came from the client, not a person (the Claude desktop app has declined unseen in 5-12 ms). */
+export const MIN_HUMAN_ANSWER_MS = 500;
+
+/** Wrap an elicitation sender: an answer faster than a person could give means the dialog wasn't shown ("cancel"). */
+export function humanElicit(send: NonNullable<Ctx['elicit']>): NonNullable<Ctx['elicit']> {
+  return async (p) => {
+    const t0 = Date.now();
+    const r = await send(p);
+    const ms = Date.now() - t0;
+    return ms < MIN_HUMAN_ANSWER_MS ? { action: 'cancel', content: { instantMs: ms, instantAction: r.action } } : r;
+  };
+}
+
 /** Ask the user directly with an MCP elicitation dialog. */
 export async function askUser(elicit: NonNullable<Ctx['elicit']>, description: string, areas: string[]): Promise<{ decision: 'task' | 'session' | 'decline' } | { error: string }> {
   const r = await elicit({
@@ -23,8 +36,11 @@ export async function askUser(elicit: NonNullable<Ctx['elicit']>, description: s
       required: ['decision'],
     },
   });
-  // "cancel" = dismissed or never shown (some clients advertise elicitation but don't display it): no answer, not a no
-  if (r.action === 'cancel') return { error: 'the approval dialog was dismissed or not shown' } as any;
+  // "cancel" = dismissed or never shown (some clients advertise elicitation but don't display it, or answer it unseen: humanElicit): no answer, not a no
+  if (r.action === 'cancel') {
+    const c = r.content as { instantMs?: number; instantAction?: string } | undefined;
+    return { error: c?.instantMs !== undefined ? `the client answered "${c.instantAction}" in ${c.instantMs} ms, too fast for a person, so the dialog wasn't shown` : 'the approval dialog was dismissed or not shown' };
+  }
   if (r.action !== 'accept') return { decision: 'decline' };
   const d = (r.content as any)?.decision;
   return { decision: d === 'session' ? 'session' : d === 'task' ? 'task' : 'decline' };

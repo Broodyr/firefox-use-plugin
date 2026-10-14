@@ -42,9 +42,10 @@ export class McpClient {
         this.notifications.push(msg);
         this.onNotify?.(msg);
       } else if (msg.method === 'elicitation/create' && this.onElicit) {
-        // tests play the user answering the approval dialog
+        // tests play the user answering the approval dialog, after elicitDelayMs (instant answers count as not shown)
         this.elicitations.push(msg.params);
-        this.write({ jsonrpc: '2.0', id: msg.id, result: this.onElicit(msg.params) });
+        const result = this.onElicit(msg.params);
+        setTimeout(() => this.write({ jsonrpc: '2.0', id: msg.id, result }), this.elicitDelayMs);
       } else if (msg.method !== undefined) {
         // server -> client request (roots/list etc.): reply empty
         this.write({ jsonrpc: '2.0', id: msg.id, result: {} });
@@ -101,6 +102,8 @@ export class McpClient {
   /** Answer elicitation (approval dialog) requests; set before initialize to declare the capability. */
   onElicit?: (params: any) => { action: string; content?: Record<string, unknown> };
   readonly elicitations: any[] = [];
+  /** how long "the user" takes to answer a dialog; under 500 ms the server treats the dialog as not shown */
+  elicitDelayMs = 600;
 
   async initialize() {
     const capabilities = this.onElicit ? { elicitation: {} } : {};

@@ -36,6 +36,19 @@ describe('scope approval dialog', () => {
     r = await c.call('scope_set', { description: 'install add-ons', areas: ['addons'], user_said: 'yes, use my chat approval' });
     assert.match(r.text, /scope approved via chat \(attested by Claude\)/);
 
+    // a client that answers unseen (the Claude desktop app declined in 5-12 ms): not a no, chat approval still works
+    c.elicitDelayMs = 0;
+    answer = { action: 'decline' };
+    r = await c.call('scope_set', { description: 'install add-ons', areas: ['addons'] });
+    assert.match(r.text, /APPROVAL_NEEDED[\s\S]*answered "decline" in \d+ ms, too fast for a person/);
+    r = await c.call('scope_set', { description: 'install add-ons', areas: ['addons'], user_said: 'yes, approved in chat' });
+    assert.match(r.text, /scope approved via chat \(attested by Claude\)/);
+    // nor is an instant accept a yes
+    answer = { action: 'accept', content: { decision: 'task' } };
+    r = await c.call('scope_set', { description: 'install add-ons', areas: ['addons'] });
+    assert.match(r.text, /APPROVAL_NEEDED[\s\S]*answered "accept"/);
+    c.elicitDelayMs = 600;
+
     answer = { action: 'accept', content: { decision: 'session' } };
     r = await c.call('scope_set', { description: 'prefs for the whole session', areas: ['prefs'] });
     assert.match(r.text, /kept approved for the rest of this session/);
@@ -56,6 +69,11 @@ describe('scope approval dialog', () => {
       const r = await p.call('scope_set', { description: 'change a test pref', areas: ['prefs'] });
       assert.match(r.text, /scope approved via approval dialog/, r.text);
       assert.equal(p.elicitations.length, 1);
+      // an instant decline through the proxy is "not shown" too, so a chat approval gets through
+      p.elicitDelayMs = 0;
+      p.onElicit = () => ({ action: 'decline' });
+      const r2 = await p.call('scope_set', { description: 'install add-ons', areas: ['addons'], user_said: 'yes, approved in chat' });
+      assert.match(r2.text, /scope approved via chat/, r2.text);
     } finally { await p.close(); h3.cleanup(); }
   });
 

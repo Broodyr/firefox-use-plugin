@@ -24,7 +24,7 @@ import { networkTools } from './tools/network.js';
 import { realmTools } from './tools/realms.js';
 import { waitTools } from './tools/waits.js';
 import { snapshotTools } from './tools/snapshots.js';
-import { askUser, scopeTools } from './tools/scope.js';
+import { askUser, humanElicit, scopeTools } from './tools/scope.js';
 import { restoreFastScripts } from './adapters/violentmonkey.js';
 import { uboTools } from './tools/ubo.js';
 import { userscriptTools } from './tools/userscripts.js';
@@ -182,7 +182,7 @@ async function routeTool(name: string, args: Record<string, unknown>): Promise<{
     const p = await ownerPeer();
     if (p && name === 'scope_set' && canElicit() && Array.isArray(args.areas)) {
       // the approval dialog belongs to this session's user, not the owning session's
-      const r = await askUser((q) => server.elicitInput({ mode: 'form', ...q } as any, { timeout: 10 * 60 * 1000 }) as any, String(args.description ?? ''), (args.areas as string[]).map(normalizeArea)).catch(() => null);
+      const r = await askUser(clientElicit, String(args.description ?? ''), (args.areas as string[]).map(normalizeArea)).catch(() => null);
       if (r && 'decision' in r && r.decision === 'decline') return { isError: true, content: [{ type: 'text', text: 'error: SCOPE_DECLINED\nthe user declined this scope in the approval dialog\nhint: Do not retry the same request; ask the user in chat what they want instead.' }] };
       if (r && 'decision' in r) { args.user_said = `(approved in the Claude Code dialog: ${r.decision === 'session' ? 'for the rest of this session' : 'for this task'})`; args.lifetime = r.decision; }
     }
@@ -272,7 +272,7 @@ async function runTool(name: string, rawArgs: Record<string, unknown>): Promise<
       checkpoint: async (b, label) => (autoCheckpoints(b) ? (await takeWarm(b, label, true)).id : null),
       call: async (n, a) => { const r = await runTool(n, a); return { ok: !r.isError, text: r.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join('\n') }; },
       // the dialog goes to THIS session's user: a call routed from another session asks in that session (routeTool)
-      elicit: canElicit() && !currentClient() ? (p) => server.elicitInput({ mode: 'form', ...p } as any, { timeout: 10 * 60 * 1000 }) as any : undefined,
+      elicit: canElicit() && !currentClient() ? clientElicit : undefined,
     };
     // breakpoints saved by the backend before a hot reload: attach (which sets them again) before the call can hit one
     if (!browser && !NO_PAUSE_RACE.has(name) && savedBreakpoints()) await getBrowser().catch(() => {});
@@ -389,6 +389,9 @@ async function raceWithPause(name: string, work: Promise<ToolOutput | string>, d
 ${'p' in r ? `${name} is still waiting inside the page; it finishes after the page resumes.` : `${name} is waiting because the page is paused in the debugger.`} Next: debugger_state, eval_paused, step, resume.`;
   } finally { next.cancel(); }
 }
+
+/** The connected client's approval dialog; instant answers count as not shown (humanElicit). */
+const clientElicit = humanElicit((p) => server.elicitInput({ mode: 'form', ...p } as any, { timeout: 10 * 60 * 1000 }) as any);
 
 /** Does the connected client (Claude Code, through the proxy) show MCP elicitation dialogs? */
 function canElicit(): boolean { return !!server.getClientCapabilities()?.elicitation && !process.env.FIREFOX_USE_NO_ELICIT && loadConfig().approvalDialog !== false; }
