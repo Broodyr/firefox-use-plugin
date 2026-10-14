@@ -11,6 +11,7 @@ import type { Browser } from '../browser/session.js';
 import { FIRST_STATEMENT, debuggerFor, debuggerIfRunning } from '../browser/debugger.js';
 import { VM_ID, vmScripts } from '../adapters/violentmonkey.js';
 import { PROBES } from '../browser/internals.js';
+import { TRACER_PROBE, evalInContentProcess } from '../browser/loadtrace.js';
 import { msglogProbe } from '../browser/msglog.js';
 import { COMPANION_DIR, COMPANION_ID, compCall } from '../adapters/companion.js';
 
@@ -18,6 +19,7 @@ export async function runSelfcheck(b: Browser): Promise<{ ok: string[]; broken: 
   const ok: string[] = [], broken: string[] = [];
   const add = (name: string, r: unknown) => (r === true ? ok.push(name) : broken.push(`${name}: ${r}`));
   for (const p of PROBES) add(p.feature, await b.callChrome(p.code, { id: COMPANION_ID, path: COMPANION_DIR }).catch((e) => String(e.message)));
+  add('trace_load tracer and breakpoint columns (Debugger API, in a content process)', await b.dt().then((d) => evalInContentProcess(d, `String((${TRACER_PROBE})())`)).then((r) => r === 'true' || String(r), (e) => String(e.message)));
   add('messaging log (ProxyMessenger conduit hook)', await msglogProbe(b, COMPANION_ID, () => compCall(b, 'try { await browser.runtime.sendMessage({ __ffSelfcheck: 1 }); } catch (e) {} return true;')).catch((e) => String(e.message)));
   // devtools hub and the debugger connection (breakpoints, positions, first-statement event)
   add('console/network/realms (devtools hub)', await b.dt().then((d) => !d.dead || 'hub down', (e) => String(e.message)));

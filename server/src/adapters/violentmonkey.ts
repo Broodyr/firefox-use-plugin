@@ -26,6 +26,35 @@ export interface Meta {
   runAt: string; injectInto: string; noframes: boolean;
 }
 
+/**
+ * Would a script with this metadata run on `url`? Violentmonkey's rules: @match patterns (a pattern without a port
+ * doesn't match a URL with one, unless `anyPort`: fast mode's WebExtension patterns have no port), @include globs or
+ * /regex/, minus @exclude / @exclude-match. Patterns it can't read don't match.
+ */
+export function metaMatchesUrl(meta: Meta, url: string, anyPort = false): boolean {
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  const glob = (g: string) => new RegExp('^' + g.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+  const pat = (p: string): boolean => {
+    if (p === '<all_urls>') return /^(https?|file|ftp):$/.test(u.protocol);
+    const m = /^(\*|https?|file|ftp):\/\/(\*|\*\.[^/*]+|[^/*]+)?(\/.*)$/.exec(p);
+    if (!m) return false;
+    const scheme = u.protocol.slice(0, -1);
+    if (m[1] === '*' ? !/^https?$/.test(scheme) : m[1] !== scheme) return false;
+    const want = m[2] ?? '', host = anyPort ? u.hostname : u.host;
+    const bare = anyPort ? want.replace(/:\d+$/, '') : want;
+    if (bare !== '*' && !(bare.startsWith('*.') ? host === bare.slice(2) || host.endsWith(bare.slice(1)) : host === bare)) return false;
+    return glob(m[3]).test(u.pathname + u.search);
+  };
+  const inc = (p: string) => {
+    const r = /^\/(.*)\/([a-z]*)$/.exec(p);
+    if (r) { try { return new RegExp(r[1], r[2]).test(url); } catch { return false; } }
+    return glob(p).test(url);
+  };
+  if (meta.excludeMatch.some(pat) || meta.exclude.some(inc)) return false;
+  return meta.match.some(pat) || meta.include.some(inc);
+}
+
 /** Offsets refer to `code` as given; callers pass LF-normalised text (readScript). */
 export function parseMeta(code: string): { meta: Meta; start: number; end: number } | null {
   const m = /\/\/\s*==UserScript==\s*\n([\s\S]*?)\/\/\s*==\/UserScript==[^\n]*\n?/.exec(code);
@@ -200,6 +229,18 @@ export function readState(): SyncState {
   try { const s = JSON.parse(fs.readFileSync(stateFile(), 'utf8')); return { links: s.links ?? {}, devPrelude: s.devPrelude ?? true, fastGm: s.fastGm ?? 'persisted' }; } catch { return { links: {}, devPrelude: true, fastGm: 'persisted' }; }
 }
 export function writeState(s: SyncState) { fs.writeFileSync(stateFile(), JSON.stringify(s, null, 1)); }
+
+/** Names of the linked dev scripts (workspace files) whose metadata says they run on `url` (verify's first visit there). */
+export function devScriptsFor(url: string): string[] {
+  const out: string[] = [];
+  for (const [file, l] of Object.entries(readState().links)) {
+    try {
+      const meta = parseMeta(fs.readFileSync(relPath(file).abs, 'utf8').replace(/\r\n?/g, '\n'))?.meta;
+      if (meta && metaMatchesUrl(meta, url, l.mode === 'fast')) out.push(l.name);
+    } catch { /* file gone or outside the workspace: not expected */ }
+  }
+  return out;
+}
 
 export const hashOf = (s: string) => crypto.createHash('sha256').update(s.replace(/\r\n?/g, '\n')).digest('hex').slice(0, 16);
 

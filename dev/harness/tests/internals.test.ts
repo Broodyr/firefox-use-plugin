@@ -42,12 +42,6 @@ describe('Firefox internals', () => {
     before(async () => { h = makeHome(); c = await startServer(h.env); });
     after(async () => { await c.close(); h.cleanup(); });
 
-    // TEMPORARY (2026-10-13): which URL jsdebugger.sys.mjs loads from on this Firefox (159 moved it to moz-src)
-    it('diagnostic: jsdebugger.sys.mjs URLs', async () => {
-      const r = await c.call('eval_privileged', { code: `const out = {}; for (const u of ["moz-src:///devtools/platform/jsdebugger.sys.mjs", "resource://gre/modules/jsdebugger.sys.mjs"]) { try { out[u] = typeof ChromeUtils.importESModule(u).addDebuggerToGlobal; } catch (e) { out[u] = "ERR " + (e && e.message || e); } } return out;` });
-      console.log(`[diagnostic] jsdebugger.sys.mjs on this Firefox: ${r.text.replace(/\s+/g, ' ').slice(0, 600)}`);
-    });
-
     it('ff_selfcheck: every internal works', async () => {
       const r = await c.call('ff_selfcheck', {});
       assert.ok(!r.isError, r.text);

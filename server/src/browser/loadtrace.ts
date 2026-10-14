@@ -87,7 +87,7 @@ const INSTALL = `(() => {
   return 'ok';
 })()`;
 
-/** ff_selfcheck: the tracer's Debugger calls (and the breakpoint-column ones) on a content-principal sandbox in the parent process (true or an error). */
+/** ff_selfcheck (in a content process, like the tracer): its Debugger calls and the breakpoint-column ones (true or an error). */
 export const TRACER_PROBE = `() => {
   ${ADD_DEBUGGER}
   const sb = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true });
@@ -133,8 +133,22 @@ const COLLECT = `(() => {
 })()`;
 
 /** Content processes that can run a tab's scripts (web content and the preallocated ones a navigation may take). */
-function contentProcesses(d: Devtools): TargetInfo[] {
+export function contentProcesses(d: Devtools): TargetInfo[] {
   return [...d.targets.values()].filter((t) => t.alive && t.type === 'process' && t.consoleActor && /^(web|prealloc|file)/.test(t.remoteType ?? ''));
+}
+
+/**
+ * Evaluate an expression in a content process's privileged (devtools) scope, where the tracer runs, and return its
+ * value (the expression should give a string). Code that compiles other code (the tracer probe, a page's script for
+ * breakpoint columns) runs here: the parent process refuses to compile scripts whose file name isn't a chrome://,
+ * resource://, moz-src:// or file:// URL unless an AutoConfig script is present (seen on a clean Firefox 159 install).
+ */
+export async function evalInContentProcess(d: Devtools, expr: string, timeoutMs = 10000): Promise<unknown> {
+  const t = contentProcesses(d)[0];
+  if (!t) throw new Error('no content process to evaluate in');
+  const r = await d.evaluate(t.consoleActor!, expr, timeoutMs);
+  if (r.exception) throw new Error(r.exception);
+  return d.longString(r.result);
 }
 
 export async function startLoadTrace(d: Devtools): Promise<TargetInfo[]> {

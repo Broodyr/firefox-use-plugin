@@ -13,7 +13,7 @@ import { gripText, rdpEvaluate } from './devtools.js';
 import type { Browser } from './session.js';
 import { contextIds } from './realms.js';
 import { sleep } from './launcher.js';
-import { ADD_DEBUGGER } from './loadtrace.js';
+import { ADD_DEBUGGER, evalInContentProcess } from './loadtrace.js';
 
 export const PAUSE_TIMEOUT_MS = Number(process.env.FIREFOX_USE_PAUSE_TIMEOUT_MS) || 60000;
 
@@ -373,30 +373,34 @@ export class Debugger {
    * The first breakable column of a line of a source that isn't loaded yet: the fetched text is compiled as a
    * function body (one line of wrapper above it, columns unchanged) in a throwaway sandbox, never called, and a
    * Debugger in its own compartment lists the possible breakpoints of that line across all nested scripts.
-   * Falls back to the line's indentation.
+   * Falls back to the line's indentation. The text is fetched in the parent but compiled in a content process (where
+   * page scripts are compiled anyway): the parent refuses to compile it without an AutoConfig script present.
    */
   private async firstBreakable(url: string, line: number): Promise<number> {
+    let text: string;
+    try { text = await this.b.callChrome<string>(`async ({ url }) => (await fetch(url)).text()`, { url }); } catch { return 0; }
+    const indent = (/^\s*/.exec(text.split(/\r?\n/)[line - 1] ?? '') ?? [''])[0].length;
+    const compile = `(({ text, line }) => {
+      ${ADD_DEBUGGER}
+      const host = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true });
+      addDebuggerToGlobal(host);
+      const sb = Cu.Sandbox(null, { freshCompartment: true });
+      try {
+        // (explicit file name and line 1: otherwise lines count from the caller's position)
+        const fn = Cu.evalInSandbox("(function () {\\n" + text + "\\n})", sb, null, "firefox-use-breakpoint-probe", 1);
+        const dbg = new host.Debugger();
+        const script = dbg.addDebuggee(sb).makeDebuggeeValue(fn).script;
+        const cols = [];
+        const walk = (s) => { for (const p of s.getPossibleBreakpoints({ line: line + 1 })) cols.push(p.columnNumber - 1); for (const c of s.getChildScripts()) walk(c); };
+        walk(script);
+        dbg.removeAllDebuggees();
+        return String(cols.length ? Math.min(...cols) : -1);
+      } finally { Cu.nukeSandbox(sb); }
+    })(${JSON.stringify({ text, line })})`;
     try {
-      return await this.b.callChrome<number>(`async ({ url, line }) => {
-        const text = await (await fetch(url)).text();
-        const indent = (/^\\s*/.exec(text.split(/\\r?\\n/)[line - 1] ?? "") || [""])[0].length;
-        ${ADD_DEBUGGER}
-        const host = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true });
-        addDebuggerToGlobal(host);
-        const sb = Cu.Sandbox(null, { freshCompartment: true });
-        try {
-          // (explicit file name and line 1: otherwise lines count from the caller's position)
-          const fn = Cu.evalInSandbox("(function () {\\n" + text + "\\n})", sb, null, "firefox-use-breakpoint-probe", 1);
-          const dbg = new host.Debugger();
-          const script = dbg.addDebuggee(sb).makeDebuggeeValue(fn).script;
-          const cols = [];
-          const walk = (s) => { for (const p of s.getPossibleBreakpoints({ line: line + 1 })) cols.push(p.columnNumber - 1); for (const c of s.getChildScripts()) walk(c); };
-          walk(script);
-          dbg.removeAllDebuggees();
-          return cols.length ? Math.min(...cols) : indent;
-        } catch (e) { return indent; } finally { Cu.nukeSandbox(sb); }
-      }`, { url, line });
-    } catch { return 0; }
+      const col = Number(await evalInContentProcess(await this.b.dt(), compile));
+      return Number.isInteger(col) && col >= 0 ? col : indent;
+    } catch { return indent; }
   }
 
   /**

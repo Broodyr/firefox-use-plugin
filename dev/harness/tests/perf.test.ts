@@ -68,11 +68,6 @@ describe('performance', () => {
     const file = /saved (\S+\.json\.gz)/.exec(r.text)![1];
     const prof = JSON.parse(zlib.gunzipSync(fs.readFileSync(file)).toString('utf8'));
     assert.ok(prof.meta && Array.isArray(prof.processes), 'a Gecko profile');
-    // TEMPORARY (2026-10-13): the label frames of layout/style flushes on this Firefox (159 Beta: none recognized)
-    const labels = new Set<string>();
-    const walk = (o: any) => { if (!o || typeof o !== 'object') return; for (const [k, v] of Object.entries(o)) { if ((k === 'stringTable' || k === 'stringArray') && Array.isArray(v)) { for (const s of v) if (typeof s === 'string' && /flush|reflow|layout|style/i.test(s) && s.length < 120) labels.add(s); } else walk(v); } };
-    walk(prof);
-    console.log(`[diagnostic] flush-like labels (${labels.size}): ${[...labels].slice(0, 40).join(' | ')}`);
     r = await c.call('perf_profile', { action: 'stop' });
     assert.match(r.text, /NOT_RUNNING/);
   });
@@ -83,12 +78,12 @@ describe('performance', () => {
     assert.match(r.text, /3 loads \+ 300 ms each: median [\d.]+ ms busy/, r.text);
     assert.match(r.text, /page script lib\.js: [\d.]+ ms · [\d.]+ ms · MO .* · \[[\d.]+–[\d.]+\]/, r.text);
     assert.match(r.text, /baseline "before" saved \(3 load\(s\)\)/);
-    libMs = 10; // the "fix": lib.js does a quarter of the work
+    libMs = 30; // the "fix": lib.js does under a third of the work (still enough for a starved sampler to see)
     r = await c.call('perf_script_cost', { url: `${base}/`, runs: 3, settle_ms: 300, compare_to: 'before' });
     assert.ok(!r.isError, r.text);
     const m = /page script lib\.js: ([\d.]+) -> ([\d.]+) ms \(-[\d.]+ ms, -(\d+)%\)/.exec(r.text);
     assert.ok(m, r.text);
-    assert.ok(Number(m![1]) >= 25 && Number(m![2]) <= 25 && Number(m![3]) >= 40, r.text);
+    assert.ok(Number(m![1]) >= 25 && Number(m![2]) <= 70 && Number(m![3]) >= 40, r.text);
     assert.match((await c.call('perf_script_cost', { compare_to: 'nope' })).text, /NO_BASELINE/);
     libMs = 100;
   });

@@ -110,7 +110,6 @@ export const PROBES: Probe[] = [
     feature: 'leftover automation prefs (RecommendedPreferences)',
     code: `async () => { ${RECOMMENDED} return recommended.length >= 5 || "only " + recommended.length + " recommended prefs parsed"; }`,
   },
-  { feature: 'trace_load tracer and breakpoint columns (Debugger API)', code: TRACER_PROBE },
   {
     feature: 'orphan BiDi session cleanup (RemoteAgent)',
     code: `() => { const { RemoteAgent } = ChromeUtils.importESModule("chrome://remote/content/components/RemoteAgent.sys.mjs"); return typeof RemoteAgent.webDriverBiDi?.deleteSession === "function" || "deleteSession missing"; }`,
@@ -175,6 +174,6 @@ export const PROBES: Probe[] = [
 
 /**
  * Probe sources for internals.test.ts: the chrome probes plus the internals that ff_selfcheck exercises another
- * way (the messaging-log hook, through a message the companion sends).
+ * way (the messaging-log hook, through a message the companion sends; the Debugger API, in a content process).
  */
-export const COVERAGE_TEXT = [...PROBES.map((p) => p.code), MSGLOG_INSTALL].join('\n');
+export const COVERAGE_TEXT = [...PROBES.map((p) => p.code), MSGLOG_INSTALL, TRACER_PROBE].join('\n');

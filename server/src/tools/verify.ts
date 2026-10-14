@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Browser } from '../browser/session.js';
 import { evalIn, type RealmSpec } from '../browser/realms.js';
 import { renderUboEntry, uboLogger, UBO_ID } from '../adapters/ubo.js';
-import { mapVmStacks } from '../adapters/violentmonkey.js';
+import { devScriptsFor, mapVmStacks } from '../adapters/violentmonkey.js';
 import { pageTools } from './page.js';
 import { renderEntries } from './console.js';
 import { tool, tabArg, type Ctx, type ToolOutput } from './registry.js';
@@ -101,13 +101,15 @@ export const verifyTools = [
         if (!ok) waitNote = `wait_for ${a.wait_for}: not found within 10 s`;
       }
       if (a.settle_ms) await new Promise((r) => setTimeout(r, a.settle_ms));
-      // dev userscripts that started on this URL at the previous verify: give them up to 3 s more (Violentmonkey's
-      // content-mode injection waits on its background, slow under load; checks run too early were a false fail)
+      // dev userscripts that started on this URL at the previous verify (the first time: the linked ones whose
+      // @match / @include cover it): give them up to 3 s more (Violentmonkey's content-mode injection waits on its
+      // background, slow under load; checks run too early were a false fail)
       const docKey = navText.split('\n')[0].replace(/^.* — /, '').replace(/#.*$/, '');
       const startsMap = (b.adapters.get('verifyStarts') as Map<string, string[]> | undefined) ?? new Map<string, string[]>();
       b.adapters.set('verifyStarts', startsMap);
       const started = () => new Set(d.log.filter((e) => e.seq > c0 && e.text.startsWith('[claude-start] ')).map((e) => { try { return String(JSON.parse(e.text.slice(15)).script); } catch { return ''; } }));
-      const expected = startsMap.get(docKey) ?? [];
+      const firstVisit = !startsMap.has(docKey);
+      const expected = startsMap.get(docKey) ?? (b.personal ? [] : devScriptsFor(docKey));
       const tw = Date.now();
       while (expected.some((s) => !started().has(s)) && Date.now() - tw < 3000) await new Promise((r) => setTimeout(r, 100));
       const startedNow = started();
@@ -133,7 +135,9 @@ export const verifyTools = [
       const url = navText.split('\n')[0];
       lines.push(`verify ${url} — ${results.length ? `${passed}/${results.length} check(s) passed` : 'no checks'} · loaded in ${loadMs} ms · ${errors.length} new error(s)`);
       if (waitNote) lines.push(waitNote);
-      if (missing.length) lines.push(`NOTE: dev userscript(s) that started here at the previous verify did not start this time (waited 3 s): ${missing.join(', ')}. Disabled, @match changed, or a failed install? us_read(kind: "list" | "logs").`);
+      if (missing.length) lines.push(firstVisit
+        ? `NOTE: linked dev userscript(s) whose @match / @include cover this URL did not start (waited 3 s): ${missing.join(', ')}. Disabled, or a failed install? us_read(kind: "list" | "logs").`
+        : `NOTE: dev userscript(s) that started here at the previous verify did not start this time (waited 3 s): ${missing.join(', ')}. Disabled, @match changed, or a failed install? us_read(kind: "list" | "logs").`);
       else if (expected.length && waitedMs > 150) lines.push(`(waited ${waitedMs} ms for dev userscript(s) ${expected.join(', ')} to start)`);
       for (const r of results) lines.push(`${r.pass ? '✔' : '✖'} ${r.name} → ${r.value}`);
       // Violentmonkey positions -> workspace file lines, as console_read and us_read(kind: "logs") show them

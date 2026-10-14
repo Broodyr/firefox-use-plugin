@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { McpClient, makeHome, startFixtures, startServer } from './helpers.ts';
 
@@ -175,7 +176,25 @@ document.documentElement.setAttribute('data-starter', '1');
     await c.call('us_set_enabled', { script: 'starter', enabled: false });
     r = await c.call('verify', { checks: ['document.documentElement.dataset.starter === "1"'] });
     assert.match(r.text, /NOTE: dev userscript\(s\) that started here at the previous verify did not start this time \(waited 3 s\): starter/, r.text);
+    // a URL verify hasn't seen yet: the linked scripts whose @match covers it are expected there too
+    r = await c.call('verify', { url: fx.url('/text.html'), checks: ['true'] });
+    assert.match(r.text, /NOTE: linked dev userscript\(s\) whose @match \/ @include cover this URL did not start \(waited 3 s\): starter/, r.text);
     await c.call('us_uninstall', { script: 'starter' });
+  });
+
+  it('which linked scripts a URL expects: Violentmonkey\'s @match / @include rules', async () => {
+    const { metaMatchesUrl } = await import(pathToFileURL(path.join(import.meta.dirname, '..', '..', '..', 'server', 'dist', 'adapters', 'violentmonkey.js')).href);
+    const meta = (o: Record<string, string[]>) => ({ match: [], include: [], exclude: [], excludeMatch: [], ...o });
+    assert.equal(metaMatchesUrl(meta({ match: ['http://127.0.0.1/*'] }), 'http://127.0.0.1:8080/x'), false, 'a pattern without a port: no port only');
+    assert.equal(metaMatchesUrl(meta({ match: ['http://127.0.0.1/*'] }), 'http://127.0.0.1:8080/x', true), true, 'fast mode: any port');
+    assert.equal(metaMatchesUrl(meta({ match: ['http://127.0.0.1:8080/a/*'] }), 'http://127.0.0.1:8080/a/b?q=1'), true);
+    assert.equal(metaMatchesUrl(meta({ match: ['*://*.example.com/*'] }), 'https://sub.example.com/p'), true);
+    assert.equal(metaMatchesUrl(meta({ match: ['*://*.example.com/*'] }), 'https://example.com/'), true);
+    assert.equal(metaMatchesUrl(meta({ match: ['*://*.example.com/*'] }), 'https://badexample.com/'), false);
+    assert.equal(metaMatchesUrl(meta({ include: ['http://127.0.0.1*'] }), 'http://127.0.0.1:9/x'), true);
+    assert.equal(metaMatchesUrl(meta({ include: ['/^https:\\/\\/a\\.test\\//'] }), 'https://a.test/x'), true);
+    assert.equal(metaMatchesUrl(meta({ match: ['*://*/*'], exclude: ['*/private/*'] }), 'https://a.test/private/x'), false);
+    assert.equal(metaMatchesUrl(meta({ match: ['not a pattern'] }), 'https://a.test/'), false);
   });
 
   it('Violentmonkey stack lines are file lines past @requires; an uncaught top-level error says its line is unknown', async () => {
