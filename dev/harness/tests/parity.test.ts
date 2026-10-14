@@ -13,6 +13,8 @@ describe('parity tools', () => {
 
   const text = async () => (await c.call('get_page_text', {})).text;
   const title = async () => (await c.call('tabs_list', {})).text;
+  // the page's own handler sets the title after the input event (a slow runner: later than the tool returns)
+  const titleUntil = async (re: RegExp, ms = 3000) => { let t = await title(); for (const t0 = Date.now(); !re.test(t) && Date.now() - t0 < ms;) { await new Promise((r) => setTimeout(r, 100)); t = await title(); } return t; };
 
   it('batch runs steps in order, interleaves images, stops on error', async () => {
     let r = await c.call('batch', { actions: [
@@ -56,7 +58,7 @@ describe('parity tools', () => {
     assert.match(r.text, /^100x50/, r.text);
     // coordinates now refer to the zoomed image: (50, 25) is the middle of the div
     await c.call('hover', { target: { x: 50, y: 25 } });
-    assert.match(await title(), /hovered/);
+    assert.match(await titleUntil(/hovered/), /hovered/);
     await c.call('resize', {});
   });
 
@@ -64,7 +66,7 @@ describe('parity tools', () => {
     await c.call('navigate', { url: fx.url('/hover.html') });
     let r = await c.call('hover', { target: { x: 150, y: 125 } });
     assert.match(r.text, /hovering/);
-    assert.match(await title(), /hovered/);
+    assert.match(await titleUntil(/hovered/), /hovered/);
     await c.call('navigate', { url: fx.url('/form.html') });
     r = await c.call('scroll', { direction: 'down', amount: 3 });
     assert.match(r.text, /page scroll now \(0, 300\)/, r.text);

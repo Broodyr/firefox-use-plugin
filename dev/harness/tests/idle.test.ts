@@ -19,7 +19,7 @@ describe('idle quit', () => {
     assert.ok(!alive(pid), 'Firefox closed after 3 s idle');
     assert.match(c.stderr.join('\n'), /no tool calls for \d+ min: closing Firefox/);
     const r = await c.call('ff_launch', {});
-    assert.match(r.text, /note: Firefox had been closed after 0\.05 min without tool calls \(idle quit\); relaunched with 2 agent tab\(s\) reopened/);
+    assert.match(r.text, /note: Firefox had been closed after 0\.05 min without tool calls \(idle quit\); relaunched with 2 agent tab\(s\) reopened/, `${r.text}\n--- server stderr (last 40 lines):\n${c.stderr.slice(-40).join('\n')}`);
     const s = await c.call('scope_show', {});
     assert.match(s.text, /scope: prefs for the idle test/);
     const t = await c.call('tabs_list', {});

@@ -89,7 +89,6 @@ async function perform(b: Browser, context: string, actions: any[]) {
   await b.bidi.send('input.releaseActions', { context }).catch(() => {});
 }
 
-async function urlOf(b: Browser, context: string) { return b.callPage(context, '() => location.href').catch(() => '?'); }
 
 export function checkUploadPath(p: string): string {
   const abs = path.resolve(workspace(), p);
@@ -122,17 +121,20 @@ export const inputTools = [
       const clicks = Array.from({ length: a.count }, () => [{ type: 'pointerDown', button: btn }, { type: 'pointerUp', button: btn }]).flat();
       const lp = await livePoint(b, top, o);
       if (lp) live.pointer({ kind: 'click', tab: a.tab ?? b.cur, ...lp });
+      // mark this document (in our sandbox: invisible to the page, gone with the document), so that a navigation
+      // the click starts is reported once the NEW document answers: until it commits, the old one still does
+      await b.callPage(top, '() => { window.__cfClickDoc = true; }').catch(() => {});
       await perform(b, context, withModifiers([move, ...clicks], a.modifiers));
       // a click may start a navigation a little later; if one started, wait for the new page (max 5 s)
       await new Promise((r) => setTimeout(r, 200));
       let after = '';
       if ((b.navStarted.get(top) ?? 0) >= t0) {
         for (let i = 0; i < 50; i++) {
-          const st = await b.callPage(top, '() => [location.href, document.readyState]').catch(() => null);
-          if (st && st[1] !== 'loading') { after = st[0]; break; }
+          const st = await b.callPage(top, '() => [location.href, document.readyState, !!window.__cfClickDoc]').catch(() => null);
+          if (st && !st[2] && st[1] !== 'loading') { after = st[0]; break; }
           await new Promise((r) => setTimeout(r, 100));
         }
-        after ||= await urlOf(b, top);
+        // still the old document after 5 s (a download, a 204, or a very slow page): don't claim a navigation
       }
       return { text: `clicked ${describePoint(a.target, o)}${after ? `\nnavigated to ${after}` : ''}`, target: after ? { url: after } : undefined };
     },
