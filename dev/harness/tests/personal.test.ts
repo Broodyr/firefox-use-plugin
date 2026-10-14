@@ -1,6 +1,7 @@
 // Personal mode: the user's own profile (here a plain throwaway one) over BiDi only.
 // The parity suites also run against it: CF_TEST_PERSONAL=1 node --test dev/harness/tests/{page,input,parity}.test.ts
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -197,7 +198,10 @@ describe('personal mode preconditions', () => {
       await new Promise((r) => setTimeout(r, 1000));
       const r = await c.call('ff_launch', { profile: 'personal', headless: true });
       assert.match(r.text, /PERSONAL_NOT_REMOTE/, r.text);
-      assert.equal(ff.exitCode, null, 'the user\'s Firefox is still running');
+      // (the process spawned above can be Firefox's launcher, which hands over to the browser and exits: look for a
+      // Firefox on that profile instead)
+      const still = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', `@(Get-CimInstance Win32_Process -Filter "Name = 'firefox.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${dir.replaceAll("'", "''")}') }).Count`], { encoding: 'utf8', windowsHide: true }).trim();
+      assert.ok(Number(still) > 0, `the user's Firefox is still running (${still} process(es) on the profile; the one spawned exited with ${ff.exitCode})`);
     } finally { await c.close(); killPersonal(h.home); h.cleanup(); }
   });
 });

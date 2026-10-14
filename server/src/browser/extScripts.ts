@@ -173,9 +173,17 @@ export const EXT_STORAGE_HASHES = `async ({ id, keys, strip }) => {
 }`;
 
 /** Returns before-values for the audit log (undefined -> key did not exist). */
+/** A background still starting (just reloaded or enabled) would miss storage.onChanged: wait for it, up to 3 s. */
+const BG_READY = `
+  if (ext.manifest?.background && ext.backgroundState !== "running" && typeof ext.promiseBackgroundStarted === "function") {
+    try { await Promise.race([ext.promiseBackgroundStarted(), new Promise((r) => setTimeout(r, 3000))]); } catch {}
+  }
+`;
+
 export const EXT_STORAGE_SET =`async ({ id, area: which, items }) => {
   ${EXT}
   ${STORAGE}
+  ${BG_READY}
   const s = await area[which]();
   const before = await s.get(Object.keys(items));
   await s.set(items);
@@ -185,6 +193,7 @@ export const EXT_STORAGE_SET =`async ({ id, area: which, items }) => {
 export const EXT_STORAGE_REMOVE = `async ({ id, area: which, keys }) => {
   ${EXT}
   ${STORAGE}
+  ${BG_READY}
   const s = await area[which]();
   const before = await s.get(keys);
   await s.remove(keys);
