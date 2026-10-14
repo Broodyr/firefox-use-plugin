@@ -11,15 +11,21 @@ import type { Devtools, TargetInfo } from './devtools.js';
 /** [epoch ms, script URL or null (type "dom": the event), line, document URL of the global, frame type or "dom", global class (Window / Sandbox)] */
 export type ExecRecord = [number, string | null, number, string | null, string, string];
 
+// Debugger.Script line lookup: getOffsetMetadata (getOffsetLocation was removed in Firefox 158), else the
+// script's first line
+const LINE_OF = `(script, offset) => typeof script.getOffsetMetadata === "function" ? script.getOffsetMetadata(offset).lineNumber
+  : typeof script.getOffsetLocation === "function" ? script.getOffsetLocation(offset).lineNumber : script.startLine`;
+
 const INSTALL = `(() => {
   const L = globalThis.__cfLoadTrace;
-  if (L) { L.log.length = 0; L.on = true; L.attach(); return 'ok'; }
+  if (L) { L.log.length = 0; L.errors = 0; L.firstError = null; L.on = true; L.attach(); return 'ok'; }
   const { addDebuggerToGlobal } = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs");
   const sb = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true });
   addDebuggerToGlobal(sb);
   const dbg = new sb.Debugger();
   const now = typeof ChromeUtils.dateNow === "function" ? () => ChromeUtils.dateNow() : () => Date.now();
-  const T = globalThis.__cfLoadTrace = { dbg, log: [], on: true };
+  const T = globalThis.__cfLoadTrace = { dbg, log: [], on: true, errors: 0, firstError: null };
+  const lineOf = ${LINE_OF};
   const content = (g) => { try { return !Cu.getObjectPrincipal(g.unsafeDereference()).isSystemPrincipal; } catch (e) { return false; } };
   // document events on the tracer's clock (exact): system-group capture listeners on each new content window,
   // which the page can't see or stop; rows [time, event, 0, document URL, "dom", "Window"]
@@ -49,23 +55,53 @@ const INSTALL = `(() => {
         let href = null;
         const cls = frame.script.global.class;
         try { const g = frame.script.global.unsafeDereference(); href = String(g.location ? g.location.href : ''); } catch (e) {}
-        const line = frame.script.getOffsetLocation(frame.offset).lineNumber;
+        const line = lineOf(frame.script, frame.offset);
         if (T.log.length < 5000) T.log.push([now(), url, line, href, frame.type, cls]);
-      } catch (e) {}
+      } catch (e) {
+        // counted and reported, never silent: a Debugger API change must not look like "no scripts ran"
+        T.errors++;
+        if (!T.firstError) T.firstError = String(e && e.message || e);
+      }
     };
   };
   T.attach();
   return 'ok';
 })()`;
 
+/** ff_selfcheck: the tracer's Debugger calls on a content-principal sandbox in the parent process (true or an error). */
+export const TRACER_PROBE = `() => {
+  const { addDebuggerToGlobal } = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs");
+  const sb = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true });
+  addDebuggerToGlobal(sb);
+  if (typeof sb.Debugger !== "function" || typeof ChromeUtils.dateNow !== "function") return "Debugger/dateNow missing";
+  const dbg = new sb.Debugger();
+  const target = Cu.Sandbox("http://selfcheck.invalid", { freshCompartment: true });
+  const lineOf = ${LINE_OF};
+  let got = null;
+  try {
+    dbg.addDebuggee(target);
+    dbg.onEnterFrame = (frame) => {
+      if (got || frame.older) return;
+      try {
+        const src = frame.script.source;
+        got = { url: src.displayURL || src.url, line: lineOf(frame.script, frame.offset), type: frame.type, cls: frame.script.global.class };
+      } catch (e) { got = { error: String(e && e.message || e) }; }
+    };
+    Cu.evalInSandbox("var selfcheck = 1;", target, null, "selfcheck-probe.js", 7);
+  } finally { dbg.onEnterFrame = undefined; dbg.removeAllDebuggees(); }
+  if (!got) return "onEnterFrame never fired";
+  if (got.error) return "frame inspection failed: " + got.error;
+  return (got.url === "selfcheck-probe.js" && got.line === 7) || "unexpected frame " + JSON.stringify(got);
+}`;
+
 const COLLECT = `(() => {
   const T = globalThis.__cfLoadTrace;
-  if (!T) return '[]';
+  if (!T) return '{"log":[],"errors":0}';
   T.on = false;
   T.dbg.onEnterFrame = undefined;
   T.dbg.onNewGlobalObject = undefined;
   T.dbg.removeAllDebuggees();
-  const out = JSON.stringify(T.log);
+  const out = JSON.stringify({ log: T.log, errors: T.errors, firstError: T.firstError });
   T.log.length = 0;
   return out;
 })()`;
@@ -86,13 +122,21 @@ export async function startLoadTrace(d: Devtools): Promise<TargetInfo[]> {
   return ok;
 }
 
-export async function stopLoadTrace(d: Devtools, ts: TargetInfo[]): Promise<ExecRecord[]> {
+export interface LoadTrace { execs: ExecRecord[]; /** frames the tracer failed to record */ errors: number; firstError?: string }
+
+export async function stopLoadTrace(d: Devtools, ts: TargetInfo[]): Promise<LoadTrace> {
   // processes created during the trace (a cross-process navigation) had no tracer; nothing to collect there
-  const out: ExecRecord[] = [];
+  const out: LoadTrace = { execs: [], errors: 0 };
   await Promise.all(ts.map(async (t) => {
     const r = await d.evaluate(t.consoleActor!, COLLECT, 3000).catch(() => null);
     if (!r || r.exception) return;
-    try { out.push(...JSON.parse(await d.longString(r.result))); } catch { /* process gone */ }
+    try {
+      const c = JSON.parse(await d.longString(r.result));
+      out.execs.push(...c.log);
+      out.errors += c.errors;
+      out.firstError ??= c.firstError ?? undefined;
+    } catch { /* process gone */ }
   }));
-  return out.sort((a, b) => a[0] - b[0]);
+  out.execs.sort((a, b) => a[0] - b[0]);
+  return out;
 }

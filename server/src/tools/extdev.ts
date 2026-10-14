@@ -11,7 +11,7 @@ import * as XS from '../browser/extScripts.js';
 import { resolveExtension } from '../browser/realms.js';
 import type { Browser } from '../browser/session.js';
 import { sleep } from '../browser/launcher.js';
-import { kb } from '../browser/devtools.js';
+import { kb, type LogEntry } from '../browser/devtools.js';
 import { checkUploadPath } from './input.js';
 import { clock } from './console.js';
 import { messagingLog } from '../browser/msglog.js';
@@ -44,10 +44,14 @@ const VALIDATE = `async ({ path }) => {
 
 interface Validation { thrown: string | null; errors: string[]; warnings: string[]; id: string | null; name: string | null; version: string | null; mv: number | null }
 
-/** Errors the extension's own realms logged since `from` (background, pages, content scripts, workers). */
+/** Errors the extension's own realms logged since `from` (background, pages, content scripts, workers), in the
+ *  order they happened: entries from different processes reach the hub in any order (Firefox 158: a content
+ *  script's "Receiving end does not exist" before the background error that caused it). */
 async function errorsSince(b: Browser, id: string, from: number): Promise<string[]> {
   const d = await b.dt();
+  const own = (e: LogEntry) => (e.realm.startsWith('extension:') ? 0 : 1);
   return d.log.filter((e) => e.seq > from && e.addonId === id && (e.level === 'error' || e.kind !== 'console'))
+    .sort((x, y) => x.ts - y.ts || own(x) - own(y))
     .slice(-10).map((e) => `${e.text.slice(0, 300)}${e.url ? ` (${e.url.replace(/^moz-extension:\/\/[^/]+/, '')}${e.line ? `:${e.line}` : ''})` : ''}`);
 }
 

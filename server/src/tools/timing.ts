@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { fail } from '../errors.js';
 import { stateDir } from '../audit/audit.js';
 import { FIRST_STATEMENT, debuggerFor, type PauseHook } from '../browser/debugger.js';
-import { startLoadTrace, stopLoadTrace, type ExecRecord } from '../browser/loadtrace.js';
+import { startLoadTrace, stopLoadTrace, type LoadTrace } from '../browser/loadtrace.js';
 import type { Browser } from '../browser/session.js';
 import { sleep } from '../browser/launcher.js';
 import { readState } from '../adapters/violentmonkey.js';
@@ -97,7 +97,7 @@ export const timingTools = [
       let preloadId: string | null = null;
       let navTo = a.url ?? '';
       const tracers = await startLoadTrace(hub);
-      let execs: ExecRecord[] = [];
+      let trace: LoadTrace | null = null;
       try {
         preloadId = (await b.bidi.send('script.addPreloadScript', { functionDeclaration: preload(a.watch ?? []), contexts: [context], sandbox: TRACE_SANDBOX })).script;
         const t0 = Date.now();
@@ -105,7 +105,8 @@ export const timingTools = [
         const r: any = await b.bidi.send('browsingContext.navigate', { context, url: navTo, wait: 'complete' }, a.timeout_ms).catch((e: any) => ({ error: e.message }));
         if (r?.error) fail('NAVIGATION_FAILED', `${navTo}: ${r.error}`);
         await sleep(a.settle_ms);
-        execs = await stopLoadTrace(hub, tracers);
+        trace = await stopLoadTrace(hub, tracers);
+        const execs = trace.execs;
         const page: any = JSON.parse(await b.callPage(context, '() => JSON.stringify(window.__cfTrace || null)', [], { sandbox: TRACE_SANDBOX }) ?? 'null');
         const origin: number = page?.origin ?? t0;
         const docUrl: string = page?.url ?? navTo;
@@ -164,17 +165,18 @@ export const timingTools = [
         const key = (r: Row) => (r.approx ? r.t + 0.999 : r.t);
         rows.sort((x, y) => key(x) - key(y));
         const file = path.join(stateDir('artifacts'), `trace-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-        fs.writeFileSync(file, JSON.stringify({ url: docUrl, rows, evals }, null, 1));
+        fs.writeFileSync(file, JSON.stringify({ url: docUrl, rows, evals, ...(trace.errors ? { tracerErrors: trace.errors, tracerFirstError: trace.firstError } : {}) }, null, 1));
         const counts = new Map<string, number>();
         for (const r of rows) counts.set(r.cat, (counts.get(r.cat) ?? 0) + 1);
         const lines = [`trace of ${docUrl}: ${[...counts].map(([k, v]) => `${v} ${k}`).join(', ')}${evals ? `, ${evals} eval script(s) not listed` : ''} (script tracer in ${tracers.length} process(es), ${execs.length} top-level frame(s))`];
+        if (trace.errors) lines.push(`WARNING: the script tracer failed on ${trace.errors} frame(s), so script rows are missing (${trace.firstError}). A Firefox update may have changed its Debugger API: run ff_selfcheck.`);
         const max = a.detail === 'full' ? 600 : a.detail === 'normal' ? 250 : 120;
         for (const r of rows.slice(0, max)) lines.push(`${`${r.t >= 0 ? '+' : '-'}${Math.abs(r.t).toFixed(1)}`.padStart(9)} ms${r.approx ? '~' : ' '} ${r.cat.padEnd(10)} ${r.text}`);
         if (rows.length > max) lines.push(`… ${rows.length - max} more rows (detail "full", or the file)`);
         lines.push(`(script${exactDom ? ' and document-event' : ''} rows are exact and in true order; ~ rows come from the page clock, which Firefox clamps to 1 ms: against exact rows they are good to about ±2 ms)`, `full trace: ${path.relative(process.cwd(), file)}`);
         return lines.join('\n');
       } finally {
-        if (!execs.length) await stopLoadTrace(hub, tracers).catch(() => {});
+        if (!trace) await stopLoadTrace(hub, tracers).catch(() => {});
         if (preloadId) await b.bidi.send('script.removePreloadScript', { script: preloadId }).catch(() => {});
       }
     },

@@ -82,7 +82,10 @@ describe('ext_dev', () => {
   it('hot reload: startup error reported, fixed, invalid manifest keeps the running version', async () => {
     write('bg.js', BG(`throw new Error('dev fixture startup boom');`));
     let r = await until(/FAILED \(files changed: bg\.js\)/);
-    assert.match(r.text, /FAILED \(files changed: bg\.js\)[^\n]*\n\s+[^\n]*dev fixture startup boom/);
+    // the background's own error is among the lines under FAILED (more may follow from it: a content script
+    // messaging the dead background)
+    const block = /FAILED \(files changed: bg\.js\)[^\n]*((?:\n {4}[^\n]*)*)/.exec(r.text)![1];
+    assert.match(block, /Error: dev fixture startup boom \(\/bg\.js:1\)/, r.text);
     write('bg.js', BG('// fixed'));
     r = await until(/reloaded \(files changed: bg\.js\)/);
     assert.match(r.text, /reloaded \(files changed: bg\.js\)/);

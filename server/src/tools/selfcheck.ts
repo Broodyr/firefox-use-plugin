@@ -5,6 +5,7 @@ import { tool } from './registry.js';
 import type { Browser } from '../browser/session.js';
 import { FIRST_STATEMENT, debuggerFor, debuggerIfRunning } from '../browser/debugger.js';
 import { vmScripts } from '../adapters/violentmonkey.js';
+import { TRACER_PROBE } from '../browser/loadtrace.js';
 
 /** [feature, privileged probe returning true or an error text] */
 const CHROME_PROBES: [string, string][] = [
@@ -16,7 +17,7 @@ const CHROME_PROBES: [string, string][] = [
   ['ext_dev_lint (ExtensionData.loadManifest)', `() => { const { ExtensionData } = ChromeUtils.importESModule("resource://gre/modules/Extension.sys.mjs"); return typeof ExtensionData.prototype.loadManifest === "function" || "loadManifest missing"; }`],
   ['messaging log (BroadcastConduit._recv)', `() => { const { BroadcastConduit } = ChromeUtils.importESModule("resource://gre/modules/ConduitsParent.sys.mjs"); return typeof BroadcastConduit.prototype._recv === "function" || "_recv missing"; }`],
   ['leftover automation prefs (RecommendedPreferences)', `async () => { const { RecommendedPreferences: R } = ChromeUtils.importESModule("chrome://remote/content/shared/RecommendedPreferences.sys.mjs"); const src = await (await fetch("chrome://remote/content/shared/RecommendedPreferences.sys.mjs")).text(); return (R && typeof R.alteredPrefs?.has === "function" && typeof R.applyPreferences === "function" && src.includes("const COMMON_PREFERENCES")) || "RecommendedPreferences changed"; }`],
-  ['trace_load tracer (Debugger in a fresh compartment)', `() => { const { addDebuggerToGlobal } = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs"); const sb = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true }); addDebuggerToGlobal(sb); return typeof sb.Debugger === "function" && typeof ChromeUtils.dateNow === "function" || "Debugger/dateNow missing"; }`],
+  ['trace_load tracer (Debugger frames and line lookup)', TRACER_PROBE],
   ['orphan BiDi session cleanup (RemoteAgent)', `() => { const { RemoteAgent } = ChromeUtils.importESModule("chrome://remote/content/components/RemoteAgent.sys.mjs"); return typeof RemoteAgent.webDriverBiDi?.deleteSession === "function" || "deleteSession missing"; }`],
 ];
 
