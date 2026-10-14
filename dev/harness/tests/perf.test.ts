@@ -16,7 +16,8 @@ const PAGE = `<!doctype html><title>perf</title>
     addNodes();
     setTimeout(function longTask() { busyInline(90); }, 10);
   </script>`;
-let libMs = 40;
+// long enough that a starved sampler (a loaded CI runner) still catches it
+let libMs = 100;
 const LIB = () => `function libWork() { const t = performance.now(); while (performance.now() - t < ${libMs}) {} } libWork();`;
 
 describe('performance', () => {
@@ -43,7 +44,7 @@ describe('performance', () => {
     // sampled estimates: on a starved VM (CI) the profiler misses samples (measured: a 40 ms busy loop at 20.6 ms),
     // so the bounds check attribution (each script's own time, the right order of size), not the machine's speed
     assert.ok(Number(inline![1]) >= 35, `inline self ${inline![1]}\n${r.text}`); // 90 ms long task + MO callbacks
-    assert.ok(Number(lib![1]) >= 10 && Number(lib![1]) <= 120, `lib self ${lib![1]}\n${r.text}`);
+    assert.ok(Number(lib![1]) >= 10 && Number(lib![1]) <= 250, `lib self ${lib![1]}\n${r.text}`);
     assert.match(inline![3], /^[\d.]+ ms \/ \d+$/, r.text); // MutationObserver callback time / runs
     assert.match(inline![4], /^[\d.]+ ms \/ \d+$/, r.text); // forced layout from offsetHeight
     assert.match(r.text, /long tasks \(>= 50 ms\):\n {2}\d+ ms at \+\d+ ms: page inline scripts \d+ ms/, r.text);
@@ -84,7 +85,7 @@ describe('performance', () => {
     assert.ok(m, r.text);
     assert.ok(Number(m![1]) >= 25 && Number(m![2]) <= 25 && Number(m![3]) >= 40, r.text);
     assert.match((await c.call('perf_script_cost', { compare_to: 'nope' })).text, /NO_BASELINE/);
-    libMs = 40;
+    libMs = 100;
   });
 
   it('perf_memory: the tab\'s window and the content scripts in it', async () => {

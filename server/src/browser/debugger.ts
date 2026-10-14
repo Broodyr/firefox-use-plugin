@@ -13,6 +13,7 @@ import { gripText, rdpEvaluate } from './devtools.js';
 import type { Browser } from './session.js';
 import { contextIds } from './realms.js';
 import { sleep } from './launcher.js';
+import { ADD_DEBUGGER } from './loadtrace.js';
 
 export const PAUSE_TIMEOUT_MS = Number(process.env.FIREFOX_USE_PAUSE_TIMEOUT_MS) || 60000;
 
@@ -379,7 +380,7 @@ export class Debugger {
       return await this.b.callChrome<number>(`async ({ url, line }) => {
         const text = await (await fetch(url)).text();
         const indent = (/^\\s*/.exec(text.split(/\\r?\\n/)[line - 1] ?? "") || [""])[0].length;
-        const { addDebuggerToGlobal } = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs");
+        ${ADD_DEBUGGER}
         const host = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true });
         addDebuggerToGlobal(host);
         const sb = Cu.Sandbox(null, { freshCompartment: true });

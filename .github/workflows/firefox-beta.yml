@@ -19,7 +19,7 @@ on:
 jobs:
   core:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,4 +36,5 @@ jobs:
       - name: Core suite on Firefox ${{ steps.firefox.outputs.firefox-version }}
         env:
           FIREFOX_USE_TEST_FIREFOX: ${{ steps.firefox.outputs.firefox-path }}
+          CF_TEST_CONCURRENCY: 2 # 4 vCPUs: four Firefoxes at once starve each other (timeouts, profiler gaps)
         run: npm run test:core

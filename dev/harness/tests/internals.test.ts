@@ -38,6 +38,12 @@ describe('Firefox internals', () => {
     before(async () => { h = makeHome(); c = await startServer(h.env); });
     after(async () => { await c.close(); h.cleanup(); });
 
+    // TEMPORARY (2026-10-13): which global jsdebugger.sys.mjs loads into on this Firefox (159 Beta refused the shared one)
+    it('diagnostic: jsdebugger.sys.mjs load variants', async () => {
+      const r = await c.call('eval_privileged', { code: `const out = {}; for (const g of ["shared", "devtools", "current"]) { try { const m = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs", g === "shared" ? undefined : { global: g }); out[g] = typeof m.addDebuggerToGlobal; } catch (e) { out[g] = "ERR " + (e && e.message || e); } } return out;` });
+      console.log(`[diagnostic] jsdebugger.sys.mjs on this Firefox: ${r.text.replace(/\s+/g, ' ').slice(0, 600)}`);
+    });
+
     it('ff_selfcheck: every internal works', async () => {
       const r = await c.call('ff_selfcheck', {});
       assert.ok(!r.isError, r.text);

@@ -11,6 +11,25 @@ import type { Devtools, TargetInfo } from './devtools.js';
 /** [epoch ms, script URL or null (type "dom": the event), line, document URL of the global, frame type or "dom", global class (Window / Sandbox)] */
 export type ExecRecord = [number, string | null, number, string | null, string, string];
 
+/**
+ * Prelude: `addDebuggerToGlobal` from jsdebugger.sys.mjs, loaded into the shared system global, else the DevTools
+ * global, else the calling one; every error is reported when none works (Firefox 159 Beta's parent process refused
+ * the shared global: "Failed to load"; its content processes did not). Also used by debugger.ts.
+ */
+export const ADD_DEBUGGER = `
+  const addDebuggerToGlobal = (() => {
+    const errs = [];
+    for (const o of [undefined, { global: "devtools" }, { global: "current" }]) {
+      try {
+        const m = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs", o);
+        if (typeof m.addDebuggerToGlobal === "function") return m.addDebuggerToGlobal;
+        errs.push((o ? o.global : "shared") + ": no addDebuggerToGlobal");
+      } catch (e) { errs.push((o ? o.global : "shared") + ": " + (e && e.message || e)); }
+    }
+    throw new Error("jsdebugger.sys.mjs could not be loaded (" + errs.join("; ") + ")");
+  })();
+`;
+
 // Debugger.Script line lookup: getOffsetMetadata (getOffsetLocation was removed in Firefox 158), else the
 // script's first line
 const LINE_OF = `(script, offset) => typeof script.getOffsetMetadata === "function" ? script.getOffsetMetadata(offset).lineNumber
@@ -19,7 +38,7 @@ const LINE_OF = `(script, offset) => typeof script.getOffsetMetadata === "functi
 const INSTALL = `(() => {
   const L = globalThis.__cfLoadTrace;
   if (L) { L.log.length = 0; L.errors = 0; L.firstError = null; L.on = true; L.attach(); return 'ok'; }
-  const { addDebuggerToGlobal } = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs");
+  ${ADD_DEBUGGER}
   const sb = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true });
   addDebuggerToGlobal(sb);
   const dbg = new sb.Debugger();
@@ -70,7 +89,7 @@ const INSTALL = `(() => {
 
 /** ff_selfcheck: the tracer's Debugger calls (and the breakpoint-column ones) on a content-principal sandbox in the parent process (true or an error). */
 export const TRACER_PROBE = `() => {
-  const { addDebuggerToGlobal } = ChromeUtils.importESModule("resource://gre/modules/jsdebugger.sys.mjs");
+  ${ADD_DEBUGGER}
   const sb = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), { freshCompartment: true });
   addDebuggerToGlobal(sb);
   if (typeof sb.Debugger !== "function" || typeof ChromeUtils.dateNow !== "function") return "Debugger/dateNow missing";

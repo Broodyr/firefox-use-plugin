@@ -66,8 +66,10 @@ describe('ext_dev', () => {
     assert.ok(!r.isError, r.text);
     assert.match(r.text, /realms: background/);
     assert.match(r.text, /permissions: [^\n]*storage/);
-    assert.match(r.text, /storage: local 1 key/);
     assert.match(r.text, /messaging log: on/);
+    // the background writes its key as it starts, which can be after the load returns (a slow CI runner)
+    if (!/storage: local 1 key/.test(r.text)) r = await until(/storage: local 1 key/, 15000);
+    assert.match(r.text, /storage: local 1 key/, r.text);
     await c.call('navigate', { url: fx.url('/page2.html') });
     r = await c.call('wait_for', { expr: 'document.documentElement.dataset.pong === "42" && document.documentElement.dataset.echo === "7"', timeout_ms: 5000 });
     assert.ok(!r.isError, r.text);

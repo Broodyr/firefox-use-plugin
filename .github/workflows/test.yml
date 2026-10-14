@@ -12,7 +12,7 @@ on:
 jobs:
   core:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,6 +29,10 @@ jobs:
       - run: npm run build
       - run: npm run test:setup
       - name: Core suite (source build)
+        env:
+          CF_TEST_CONCURRENCY: 2 # 4 vCPUs: four Firefoxes at once starve each other (timeouts, profiler gaps)
         run: npm run test:core
       - name: Core suite (release bundle)
+        env:
+          CF_TEST_CONCURRENCY: 2 # 4 vCPUs: four Firefoxes at once starve each other (timeouts, profiler gaps)
         run: npm run test:release
