@@ -102,7 +102,7 @@ export class McpClient {
   /** Answer elicitation (approval dialog) requests; set before initialize to declare the capability. */
   onElicit?: (params: any) => { action: string; content?: Record<string, unknown> };
   readonly elicitations: any[] = [];
-  /** how long "the user" takes to answer a dialog; under 500 ms the server treats the dialog as not shown */
+  /** how long "the user" takes to answer a dialog; the server treats an approval under 500 ms, a no under 2 s, as not shown */
   elicitDelayMs = 600;
 
   async initialize() {

@@ -26,9 +26,14 @@ describe('scope approval dialog', () => {
     r = await c.call('scope_show', {});
     assert.match(r.text, /user said: "\(approved in the Claude Code dialog: for this task\)"/);
 
+    // a no counts only after 2 s; sooner it is more likely a stray key as the dialog took focus
     answer = { action: 'accept', content: { decision: 'decline' } };
     r = await c.call('scope_set', { description: 'install add-ons', areas: ['addons'] });
+    assert.match(r.text, /APPROVAL_NEEDED[\s\S]*answered "decline" in \d+ ms, too soon to be a deliberate answer/);
+    c.elicitDelayMs = 2100;
+    r = await c.call('scope_set', { description: 'install add-ons', areas: ['addons'] });
     assert.match(r.text, /SCOPE_DECLINED/);
+    c.elicitDelayMs = 600;
     // dismissed / never shown: no answer, so chat approval (user_said) is the fallback
     answer = { action: 'cancel' };
     r = await c.call('scope_set', { description: 'install add-ons', areas: ['addons'] });
@@ -40,7 +45,7 @@ describe('scope approval dialog', () => {
     c.elicitDelayMs = 0;
     answer = { action: 'decline' };
     r = await c.call('scope_set', { description: 'install add-ons', areas: ['addons'] });
-    assert.match(r.text, /APPROVAL_NEEDED[\s\S]*answered "decline" in \d+ ms, too fast for a person/);
+    assert.match(r.text, /APPROVAL_NEEDED[\s\S]*answered "decline" in \d+ ms, too soon/);
     r = await c.call('scope_set', { description: 'install add-ons', areas: ['addons'], user_said: 'yes, approved in chat' });
     assert.match(r.text, /scope approved via chat \(attested by Claude\)/);
     // nor is an instant accept a yes
