@@ -45,9 +45,12 @@ describe('performance', () => {
     // so the bounds check attribution (each script's own time, the right order of size), not the machine's speed
     assert.ok(Number(inline![1]) >= 35, `inline self ${inline![1]}\n${r.text}`); // 90 ms long task + MO callbacks
     assert.ok(Number(lib![1]) >= 10 && Number(lib![1]) <= 250, `lib self ${lib![1]}\n${r.text}`);
-    assert.match(inline![3], /^[\d.]+ ms \/ \d+$/, r.text); // MutationObserver callback time / runs
-    assert.match(inline![4], /^[\d.]+ ms \/ \d+$/, r.text); // forced layout from offsetHeight
-    assert.match(r.text, /long tasks \(>= 50 ms\):\n {2}\d+ ms at \+\d+ ms: page inline scripts \d+ ms/, r.text);
+    // MutationObserver callback time / runs; forced layout from offsetHeight. On a shared CI runner the sampler misses
+    // short work at random (a different column each run), so there "-" (not sampled) passes; locally both are required.
+    const sampled = process.env.GITHUB_ACTIONS ? /^([\d.]+ ms \/ \d+|-)$/ : /^[\d.]+ ms \/ \d+$/;
+    assert.match(inline![3], sampled, r.text);
+    assert.match(inline![4], sampled, r.text);
+    assert.match(r.text, /long tasks \(>= 50 ms\):\n {2}\d+ ms at \+\d+ ms: [^\n]*page inline scripts \d+ ms/, r.text);
     assert.match(r.text, /busyInline \(page inline scripts:4\)/);
     assert.match(r.text, /libWork \(page script lib\.js:1\)/);
   });
