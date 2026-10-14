@@ -8,7 +8,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ROOT, firefoxPath, firefoxVersion, preflight } from './env.mjs';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'tests');
@@ -31,5 +31,7 @@ if (!files.length) { console.error(`no test files match ${set} ${names.join(' ')
 console.log(`${set}: ${files.length} file(s), concurrency ${conc}${serverRoot ? `, server from ${serverRoot}/` : ''}`);
 const ff = firefoxPath();
 console.log(`Firefox ${firefoxVersion(ff) ?? '(version unknown)'} at ${ff}${process.env.FIREFOX_USE_TEST_FIREFOX ? ' (FIREFOX_USE_TEST_FIREFOX)' : ''}`);
-const r = spawnSync(process.execPath, ['--test', `--test-concurrency=${conc}`, '--test-timeout=120000', ...files], { stdio: 'inherit' });
+// GitHub Actions: failures also as annotations and in the job summary (logs need a sign-in there)
+const reporters = process.env.GITHUB_ACTIONS ? ['--test-reporter=spec', '--test-reporter-destination=stdout', `--test-reporter=${pathToFileURL(path.join(ROOT, 'dev', 'harness', 'gh-reporter.mjs')).href}`, '--test-reporter-destination=stdout'] : [];
+const r = spawnSync(process.execPath, ['--test', `--test-concurrency=${conc}`, '--test-timeout=120000', ...reporters, ...files], { stdio: 'inherit' });
 process.exit(r.status ?? 1);

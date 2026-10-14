@@ -11,10 +11,13 @@ const mainIni = path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppDat
 
 describe('profile_sync', { skip: !fs.existsSync(mainIni) && 'no main Firefox profile on this machine' }, () => {
   let c: McpClient, h: ReturnType<typeof makeHome>;
-  before(async () => { h = makeHome(); c = await startServer(h.env); });
+  // a profiles.ini without a usable default profile (a CI image's Firefox): the server's own answer decides
+  let noMain = false;
+  before(async () => { h = makeHome(); c = await startServer(h.env); noMain = /NO_MAIN_PROFILE/.test((await c.call('profile_sync', {})).text); });
   after(async () => { await c.close(); h.cleanup(); });
 
-  it('dry run lists the plan and never copies credential extensions', async () => {
+  it('dry run lists the plan and never copies credential extensions', async (t) => {
+    if (noMain) return t.skip('no main Firefox profile on this machine');
     const r = await c.call('profile_sync', {});
     assert.ok(!r.isError, r.text);
     assert.match(r.text, /extensions: \d+ to install, \d+ to update, \d+ enabled-state change\(s\)/);
@@ -25,7 +28,8 @@ describe('profile_sync', { skip: !fs.existsSync(mainIni) && 'no main Firefox pro
     assert.doesNotMatch(a.text, /Bitwarden|2FAS/);
   });
 
-  it('applies one extension (enabled state kept) and the prefs; prefs are undo-able', async () => {
+  it('applies one extension (enabled state kept) and the prefs; prefs are undo-able', async (t) => {
+    if (noMain) return t.skip('no main Firefox profile on this machine');
     const plan = await c.call('profile_sync', { prefs: false });
     const pick = /^ {2}install (.+?) [\d.]+(?: \(disabled in your Firefox\))?$/m.exec(plan.text);
     if (!pick) return; // everything already present

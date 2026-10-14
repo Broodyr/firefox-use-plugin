@@ -66,7 +66,9 @@ async function ensureTemplate(): Promise<string | null> {
     } finally { h.cleanup(); }
     return profile;
   } catch (e) {
-    process.stderr.write(`test template failed: ${(e as Error).message}\n  falling back to copies of claude-dev${claudeDevProfile() ? '' : ', which is not set up on this machine either: the tests will fail (run npm run test:setup)'}\n`);
+    // nothing to fall back on: every test would launch Firefox and fail the same way, slowly; fail the file now
+    if (!claudeDevProfile()) throw new Error(`the test template profile could not be built, and claude-dev (the fallback) isn't set up on this machine: ${(e as Error).message}`);
+    process.stderr.write(`test template failed: ${(e as Error).message}\n  falling back to copies of claude-dev\n`);
     return null;
   } finally { fs.rmSync(lock, { recursive: true, force: true }); }
 }

@@ -13,7 +13,7 @@ import { currentClient } from './client.js';
 import { PROMPT_CAPS } from './dialogs.js';
 import type { Devtools, Hub } from './devtools.js';
 import { DOM_WALK } from './domTree.js';
-import { clearRunState, isAlive, ownerPid, readRunState, sleep, writeRunState, type RunState } from './launcher.js';
+import { clearRunState, firefoxEnv, isAlive, ownerPid, readRunState, sleep, writeRunState, type RunState } from './launcher.js';
 import { Browser, type TabInfo } from './session.js';
 
 export const PERSONAL = 'personal';
@@ -438,7 +438,7 @@ async function launchPersonal(dir: string, headless: boolean): Promise<{ port: n
   // no -no-remote: the user's own Firefox shortcuts must keep opening windows in this instance
   const args = ['-profile', dir, '--remote-debugging-port', '0'];
   if (headless) args.push('--headless');
-  const child = spawn(cfg.firefoxPath, args, { detached: true, stdio: 'ignore', windowsHide: false });
+  const child = spawn(cfg.firefoxPath, args, { detached: true, stdio: 'ignore', windowsHide: false, env: firefoxEnv(false) });
   child.unref();
   if (!child.pid) fail('LAUNCH_FAILED', `could not start ${cfg.firefoxPath}`);
   const t0 = Date.now();

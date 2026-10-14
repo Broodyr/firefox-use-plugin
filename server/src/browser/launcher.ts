@@ -246,6 +246,19 @@ function hasContentProcess(profileDir: string): boolean {
   } catch { return true; } // can't tell: keep waiting
 }
 
+/**
+ * Environment for a Firefox the server starts. System access (BiDi's chrome scope, which every privileged tool
+ * needs) is the MOZ_REMOTE_ALLOW_SYSTEM_ACCESS environment variable since Firefox 159; the --remote-allow-system-access
+ * flag that older versions need is going away and no longer suffices there. A Firefox that must not have system
+ * access (personal mode, the login window) gets the variable removed, even if the user's environment sets it.
+ */
+export function firefoxEnv(systemAccess: boolean): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  if (systemAccess) env.MOZ_REMOTE_ALLOW_SYSTEM_ACCESS = '1';
+  else delete env.MOZ_REMOTE_ALLOW_SYSTEM_ACCESS;
+  return env;
+}
+
 export async function launchFirefox(opts: Options, key: string): Promise<RunState> {
   const cfg = loadConfig();
   const { dir, throwaway } = prepareProfile(opts);
@@ -259,7 +272,7 @@ export async function launchFirefox(opts: Options, key: string): Promise<RunStat
   if (opts.headless) args.push('--headless');
   const logFile = path.join(ensureDir(cfg.runDir), `${key}.firefox.log`);
   const out = fs.openSync(logFile, 'w');
-  const child = spawn(cfg.firefoxPath, args, { detached: true, stdio: ['ignore', out, out], windowsHide: false });
+  const child = spawn(cfg.firefoxPath, args, { detached: true, stdio: ['ignore', out, out], windowsHide: false, env: firefoxEnv(true) });
   child.unref();
   fs.closeSync(out);
   if (!child.pid) fail('LAUNCH_FAILED', `could not start ${cfg.firefoxPath}`);
@@ -320,7 +333,7 @@ export function launchPlain(key: string, profileDir: string, url: string, agentU
   const cfg = loadConfig();
   const out = fs.openSync(path.join(ensureDir(cfg.runDir), `${key}.login.log`), 'w');
   // no --remote-debugging-port / --remote-allow-system-access / debugger server: an ordinary Firefox
-  const child = spawn(cfg.firefoxPath, ['-no-remote', '-profile', profileDir, ...(headless ? ['--headless'] : []), url], { detached: true, stdio: ['ignore', out, out], windowsHide: false });
+  const child = spawn(cfg.firefoxPath, ['-no-remote', '-profile', profileDir, ...(headless ? ['--headless'] : []), url], { detached: true, stdio: ['ignore', out, out], windowsHide: false, env: firefoxEnv(false) });
   child.unref();
   fs.closeSync(out);
   if (!child.pid) fail('LAUNCH_FAILED', `could not start ${cfg.firefoxPath}`);

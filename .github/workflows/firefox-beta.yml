@@ -1,6 +1,7 @@
 # The core suite on the next Firefox: Beta becomes the release at the next four-week cycle, so a change in a Firefox
-# internal the plugin relies on shows up here about a month before it reaches users. Weekly, and by hand (another
-# channel or version: latest-nightly, latest-devedition, latest, 159.0, ...). ff_selfcheck runs in the suite
+# internal the plugin relies on shows up here about a month before it reaches users (the first run caught 159 moving
+# system access to MOZ_REMOTE_ALLOW_SYSTEM_ACCESS). Weekly for Firefox's changes, on every push for ours, and by hand
+# (another channel or version: latest-nightly, latest-devedition, latest, 159.0, ...). ff_selfcheck runs in the suite
 # (internals.test.ts) and names each broken internal.
 name: firefox beta
 
@@ -9,7 +10,6 @@ on:
     - cron: '23 5 * * 1' # Mondays
   push:
     branches: [main]
-    paths: ['.github/workflows/firefox-beta.yml'] # a changed job runs once
   workflow_dispatch:
     inputs:
       firefox:

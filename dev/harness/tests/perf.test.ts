@@ -40,8 +40,10 @@ describe('performance', () => {
     const row = (label: string) => new RegExp(`\\n  ${label}: ([\\d.]+) ms · ([\\d.]+) ms · MO (.*?) · flush (.*)`).exec(r.text);
     const inline = row('page inline scripts'), lib = row('page script lib\\.js');
     assert.ok(inline && lib, r.text);
-    assert.ok(Number(inline![1]) >= 70, `inline self ${inline![1]}\n${r.text}`); // 90 ms long task + MO callbacks
-    assert.ok(Number(lib![1]) >= 25 && Number(lib![1]) <= 80, `lib self ${lib![1]}\n${r.text}`);
+    // sampled estimates: on a starved VM (CI) the profiler misses samples (measured: a 40 ms busy loop at 20.6 ms),
+    // so the bounds check attribution (each script's own time, the right order of size), not the machine's speed
+    assert.ok(Number(inline![1]) >= 35, `inline self ${inline![1]}\n${r.text}`); // 90 ms long task + MO callbacks
+    assert.ok(Number(lib![1]) >= 10 && Number(lib![1]) <= 120, `lib self ${lib![1]}\n${r.text}`);
     assert.match(inline![3], /^[\d.]+ ms \/ \d+$/, r.text); // MutationObserver callback time / runs
     assert.match(inline![4], /^[\d.]+ ms \/ \d+$/, r.text); // forced layout from offsetHeight
     assert.match(r.text, /long tasks \(>= 50 ms\):\n {2}\d+ ms at \+\d+ ms: page inline scripts \d+ ms/, r.text);
@@ -58,7 +60,9 @@ describe('performance', () => {
     await new Promise((res) => setTimeout(res, 300));
     r = await c.call('perf_profile', { action: 'stop' });
     assert.ok(!r.isError, r.text);
-    assert.match(r.text, /self time by origin:\n {2}[ \d.]+ ms {2}page http:\/\/127\.0\.0\.1:\d+/, r.text);
+    // the page is among the origins (not necessarily first: on a fresh profile uBO's first filter compile can outweigh it)
+    const origins = /self time by origin:\n((?: {2}.*\n)+)/.exec(r.text)?.[1] ?? '';
+    assert.match(origins, /^ {2}[ \d.]+ ms {2}page http:\/\/127\.0\.0\.1:\d+$/m, r.text);
     assert.match(r.text, /libWork \(page script lib\.js:1\)/);
     const file = /saved (\S+\.json\.gz)/.exec(r.text)![1];
     const prof = JSON.parse(zlib.gunzipSync(fs.readFileSync(file)).toString('utf8'));
