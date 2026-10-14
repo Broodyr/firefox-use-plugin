@@ -111,12 +111,13 @@ function detectMainProfile() {
   if (dev && path.resolve(dev).toLowerCase() === path.resolve(dir).toLowerCase()) return null;
   return fs.existsSync(dir) ? dir : null;
 }
-var REPO_ROOT, HOME, TOKEN_FILE, RUN_DIR, THROWAWAY_DIR, cached, cachedMtime;
+var REPO_ROOT, VERSION, HOME, TOKEN_FILE, RUN_DIR, THROWAWAY_DIR, cached, cachedMtime;
 var init_config = __esm({
   "server/src/config.ts"() {
     "use strict";
     init_client();
     REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+    VERSION = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version;
     HOME = process.env.FIREFOX_USE_HOME ?? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), ".local", "share"), "firefox-use");
     TOKEN_FILE = path.join(HOME, "token");
     RUN_DIR = path.join(HOME, "run");

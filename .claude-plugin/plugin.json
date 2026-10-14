@@ -1,6 +1,6 @@
 {
   "name": "firefox-use",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Deep control of a dedicated Firefox profile: browsing, privileged access, extension internals, Violentmonkey, Stylus and uBlock Origin workflows, a real debugger.",
   "author": {
     "name": "Broodyr"

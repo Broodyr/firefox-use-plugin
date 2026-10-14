@@ -18,6 +18,7 @@ var als = new AsyncLocalStorage();
 
 // server/src/config.ts
 var REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+var VERSION = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version;
 var HOME = process.env.FIREFOX_USE_HOME ?? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), ".local", "share"), "firefox-use");
 var TOKEN_FILE = path.join(HOME, "token");
 var RUN_DIR = path.join(HOME, "run");

@@ -1,6 +1,6 @@
 {
   "name": "firefox-use",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Claude Code plugin for deep, autonomous control of a Firefox dev profile",
   "private": true,
   "type": "module",

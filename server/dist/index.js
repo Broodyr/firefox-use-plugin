@@ -7378,12 +7378,13 @@ function setupCommand(script = "setup.ps1", flags = "") {
 function setupHint() {
   return fs.existsSync(path.join(HOME, "config.json")) ? `the kill switch was engaged; the user re-enables with: ${setupCommand("setup.ps1", "-TokenOnly")}` : `setup has not run yet; the user runs, once: ${setupCommand()}`;
 }
-var REPO_ROOT, HOME, TOKEN_FILE, RUN_DIR, THROWAWAY_DIR, WINDOW_MODES, cached2, cachedMtime;
+var REPO_ROOT, VERSION, HOME, TOKEN_FILE, RUN_DIR, THROWAWAY_DIR, WINDOW_MODES, cached2, cachedMtime;
 var init_config = __esm({
   "server/src/config.ts"() {
     "use strict";
     init_client();
     REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+    VERSION = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version;
     HOME = process.env.FIREFOX_USE_HOME ?? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), ".local", "share"), "firefox-use");
     TOKEN_FILE = path.join(HOME, "token");
     RUN_DIR = path.join(HOME, "run");
@@ -46796,7 +46797,7 @@ var mockTools = [
       i.recording = null;
       const { abs, rel } = harPath(rec.name);
       fs24.mkdirSync(path23.dirname(abs), { recursive: true });
-      const har = { log: { version: "1.2", creator: { name: "firefox-use", version: "0.1.0" }, browser: { name: "Firefox", version: b.versions?.firefox ?? "" }, pages: [], entries } };
+      const har = { log: { version: "1.2", creator: { name: "firefox-use", version: VERSION }, browser: { name: "Firefox", version: b.versions?.firefox ?? "" }, pages: [], entries } };
       fs24.writeFileSync(abs, JSON.stringify(har, null, 1));
       const lines = [`wrote ${rel}: ${harSummary(entries)} in ${((Date.now() - rec.started) / 1e3).toFixed(1)} s`];
       if (missing) lines.push(`WARNING: ${missing} response bod${missing === 1 ? "y was" : "ies were"} not kept by the devtools server (over 256 kB, or discarded); replay serves them empty (_bodyMissing in the file)`);
@@ -50038,7 +50039,6 @@ var Peer = class {
 
 // server/src/index.ts
 init_launcher();
-var VERSION = "0.1.0";
 var opts = parseArgs(process.argv.slice(2));
 {
   const st = readRunState(PERSONAL);
